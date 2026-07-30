@@ -1,0 +1,24 @@
+from avto_vinchick_tg.filters import FilterSettings, evaluate_profile, extract_age
+
+
+def test_extract_age_prefers_age_marker():
+    assert extract_age("Маша, 23 года\nлюблю дайвинг") == 23
+
+
+def test_rejects_banned_text_and_short_profile():
+    settings = FilterSettings(banned_text=["астрология"], min_words=5)
+
+    result = evaluate_profile("20 лет, астрология", settings)
+
+    assert not result.accepted
+    assert any("астрология" in reason for reason in result.reasons)
+    assert any("слов" in reason for reason in result.reasons)
+
+
+def test_accepts_profile_matching_required_regex():
+    settings = FilterSettings(min_age=18, max_age=30, required_regex=[r"\bpython\b"])
+
+    result = evaluate_profile("Катя, 24 года. Пишу на Python и люблю спорт.", settings)
+
+    assert result.accepted
+    assert result.age == 24
