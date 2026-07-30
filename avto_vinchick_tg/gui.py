@@ -4,8 +4,8 @@ from pathlib import Path
 import sys
 import threading
 
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QIcon
-from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -16,11 +16,14 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
-    QSplitter,
+    QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -48,13 +51,16 @@ class LogBridge(QObject):
 
 
 class MainWindow(QMainWindow):
+    steps = ["Прокси", "Telegram", "Бот", "Фильтры", "Запуск"]
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("AvtoVinchick TG")
         icon = app_icon_path()
         if icon.exists():
             self.setWindowIcon(QIcon(str(icon)))
-        self.resize(1060, 760)
+        self.resize(1120, 780)
+        self.setMinimumSize(960, 680)
         self.bridge = LogBridge()
         self.bridge.message.connect(self.append_log)
         self.bridge.core_update.connect(self.show_core_update)
@@ -69,38 +75,136 @@ class MainWindow(QMainWindow):
         self.check_app_update()
 
     def _build(self) -> None:
+        self.setStyleSheet(APP_STYLE)
         root = QWidget()
+        root.setObjectName("AppRoot")
         self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
+        root_layout = QVBoxLayout(root)
+        root_layout.setContentsMargins(18, 16, 18, 16)
+        root_layout.setSpacing(14)
 
-        version_row = QHBoxLayout()
-        layout.addLayout(version_row)
-        version_row.addWidget(QLabel(f"AvtoVinchick TG v{APP_VERSION}"))
-        version_row.addWidget(QLabel(f"Ядро tg-api-zapret v{CORE_VERSION}"))
-        version_row.addStretch(1)
+        header = self._build_header()
+        root_layout.addWidget(header)
+
+        body = QHBoxLayout()
+        body.setSpacing(14)
+        root_layout.addLayout(body, 1)
+
+        self.step_list = QListWidget()
+        self.step_list.setObjectName("StepList")
+        self.step_list.setFixedWidth(185)
+        for index, title in enumerate(self.steps, start=1):
+            item = QListWidgetItem(f"{index}. {title}")
+            item.setSizeHint(item.sizeHint().expandedTo(item.sizeHint()))
+            self.step_list.addItem(item)
+        self.step_list.currentRowChanged.connect(self.set_step)
+        body.addWidget(self.step_list)
+
+        content = QVBoxLayout()
+        content.setSpacing(12)
+        body.addLayout(content, 1)
+
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self._proxy_page())
+        self.stack.addWidget(self._telegram_page())
+        self.stack.addWidget(self._bot_page())
+        self.stack.addWidget(self._filters_page())
+        self.stack.addWidget(self._run_page())
+        content.addWidget(self.stack, 1)
+
+        nav = QHBoxLayout()
+        nav.setSpacing(10)
+        self.status_label = QLabel("Готово")
+        self.status_label.setObjectName("StatusText")
+        nav.addWidget(self.status_label, 1)
+        self.back_button = QPushButton("Назад")
+        self.back_button.clicked.connect(self.previous_step)
+        self.next_button = QPushButton("Дальше")
+        self.next_button.setObjectName("PrimaryButton")
+        self.next_button.clicked.connect(self.next_step)
+        nav.addWidget(self.back_button)
+        nav.addWidget(self.next_button)
+        content.addLayout(nav)
+
+        self.step_list.setCurrentRow(0)
+        self.set_step(0)
+
+    def _build_header(self) -> QWidget:
+        header = QFrame()
+        header.setObjectName("Header")
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(18, 14, 18, 14)
+        title_col = QVBoxLayout()
+        title = QLabel("AvtoVinchick TG")
+        title.setObjectName("AppTitle")
+        subtitle = QLabel("Фильтрация анкет Дайвинчика и отправка подходящих сообщений в вашего Telegram-бота")
+        subtitle.setObjectName("MutedText")
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        layout.addLayout(title_col, 1)
+
+        layout.addWidget(self.badge(f"Приложение v{APP_VERSION}"))
+        layout.addWidget(self.badge(f"Ядро v{CORE_VERSION}"))
+
         self.app_update_button = QPushButton("")
+        self.app_update_button.setObjectName("UpdateButton")
         self.app_update_button.clicked.connect(self.download_app_update)
         self.app_update_button.hide()
-        version_row.addWidget(self.app_update_button)
+        layout.addWidget(self.app_update_button)
+
         self.core_update_button = QPushButton("")
+        self.core_update_button.setObjectName("DisabledUpdateButton")
         self.core_update_button.setEnabled(False)
         self.core_update_button.hide()
-        version_row.addWidget(self.core_update_button)
+        layout.addWidget(self.core_update_button)
+        return header
 
-        top = QGridLayout()
-        layout.addLayout(top)
-        self.phone = self.line("Телефон")
-        self.bot_token = self.line("Bot token", password=True)
-        self.notify_chat_id = self.line("Ваш chat_id для уведомлений")
-        self.source_chat = self.line("Чат Дайвинчика")
-        self.proxy_url = self.line("SOCKS5H proxy")
-        for index, widget in enumerate(
-            [self.phone, self.bot_token, self.notify_chat_id, self.source_chat, self.proxy_url]
-        ):
-            top.addWidget(widget, index // 3, index % 3)
+    def _proxy_page(self) -> QWidget:
+        page = self.page("1. Прокси", "SOCKS5H для Telegram и Bot API")
+        self.proxy_url = self.line("SOCKS5H proxy", placeholder="socks5h://127.0.0.1:1080")
+        page.layout().addWidget(self.proxy_url)
+        return page
+
+    def _telegram_page(self) -> QWidget:
+        page = self.page("2. Telegram аккаунт", "Вход в пользовательский аккаунт Telegram")
+        form = QFormLayout()
+        form.setSpacing(12)
+        self.phone = self.raw_line("Телефон", placeholder="+79990000000")
+        self.code = QLineEdit()
+        self.code.setPlaceholderText("Код из Telegram")
+        self.password = QLineEdit()
+        self.password.setEchoMode(QLineEdit.Password)
+        self.password.setPlaceholderText("Пароль 2FA")
+        send_code = QPushButton("Отправить код")
+        submit_code = QPushButton("Войти по коду")
+        submit_password = QPushButton("Войти с 2FA")
+        send_code.clicked.connect(self.send_code)
+        submit_code.clicked.connect(self.submit_code)
+        submit_password.clicked.connect(self.submit_password)
+        form.addRow("Телефон", self.phone)
+        form.addRow(send_code)
+        form.addRow("Код", self.code)
+        form.addRow(submit_code)
+        form.addRow("2FA пароль", self.password)
+        form.addRow(submit_password)
+        box = self.panel()
+        box.layout().addLayout(form)
+        page.layout().addWidget(box)
+        return page
+
+    def _bot_page(self) -> QWidget:
+        page = self.page("3. Бот и источник", "Куда отправлять прошедшие фильтр анкеты")
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        self.bot_token = self.line("Bot token", password=True, placeholder="123456:ABC...")
+        self.notify_chat_id = self.line("Ваш chat_id", placeholder="Нажмите Найти chat_id")
+        self.source_chat = self.line("Чат Дайвинчика", placeholder="LeomatchBot")
+        grid.addWidget(self.bot_token, 0, 0)
+        grid.addWidget(self.notify_chat_id, 0, 1)
+        grid.addWidget(self.source_chat, 1, 0, 1, 2)
+        page.layout().addLayout(grid)
 
         buttons = QHBoxLayout()
-        layout.addLayout(buttons)
         for title, handler in [
             ("Сохранить", self.save_config),
             ("Тест бота", self.test_bot),
@@ -109,14 +213,14 @@ class MainWindow(QMainWindow):
             button = QPushButton(title)
             button.clicked.connect(handler)
             buttons.addWidget(button)
+        buttons.addStretch(1)
+        page.layout().addLayout(buttons)
+        return page
 
-        splitter = QSplitter()
-        layout.addWidget(splitter, 1)
-
-        filters = QWidget()
-        filter_layout = QVBoxLayout(filters)
+    def _filters_page(self) -> QWidget:
+        page = self.page("4. Фильтры", "Правила отбора анкет")
         text_grid = QGridLayout()
-        filter_layout.addLayout(text_grid, 1)
+        text_grid.setSpacing(12)
         self.banned_text = self.textbox("Запрещенные слова/фразы")
         self.required_text = self.textbox("Обязательные слова/фразы")
         self.banned_regex = self.textbox("Запрещенные regex")
@@ -125,82 +229,88 @@ class MainWindow(QMainWindow):
         text_grid.addWidget(self.required_text, 0, 1)
         text_grid.addWidget(self.banned_regex, 1, 0)
         text_grid.addWidget(self.required_regex, 1, 1)
+        page.layout().addLayout(text_grid, 1)
 
-        numeric = QGroupBox("Числовые фильтры")
-        numeric_layout = QHBoxLayout(numeric)
+        numeric = QGroupBox("Числовые ограничения")
+        numeric_layout = QGridLayout(numeric)
+        numeric_layout.setSpacing(10)
         self.min_words = self.small_line("Мин. слов")
         self.max_words = self.small_line("Макс. слов")
         self.min_chars = self.small_line("Мин. символов")
         self.max_chars = self.small_line("Макс. символов")
         self.min_age = self.small_line("Мин. возраст")
         self.max_age = self.small_line("Макс. возраст")
-        for widget in [
-            self.min_words,
-            self.max_words,
-            self.min_chars,
-            self.max_chars,
-            self.min_age,
-            self.max_age,
-        ]:
-            numeric_layout.addWidget(widget)
-        filter_layout.addWidget(numeric)
+        for index, widget in enumerate(
+            [self.min_words, self.max_words, self.min_chars, self.max_chars, self.min_age, self.max_age]
+        ):
+            numeric_layout.addWidget(widget, index // 3, index % 3)
+        page.layout().addWidget(numeric)
 
         flags = QGroupBox("Дополнительно")
-        flags_layout = QHBoxLayout(flags)
+        flags_layout = QGridLayout(flags)
+        flags_layout.setSpacing(8)
         self.reject_without_age = QCheckBox("Отсеивать без возраста")
-        self.require_photo = QCheckBox("Требовать фото")
+        self.require_photo = QCheckBox("Требовать фото/медиа")
         self.reject_links = QCheckBox("Отсеивать ссылки")
-        self.reject_mentions = QCheckBox("Отсеивать @")
+        self.reject_mentions = QCheckBox("Отсеивать @mentions")
         self.send_rejects_to_log = QCheckBox("Логировать отказы")
-        for widget in [
-            self.reject_without_age,
-            self.require_photo,
-            self.reject_links,
-            self.reject_mentions,
-            self.send_rejects_to_log,
-        ]:
-            flags_layout.addWidget(widget)
-        filter_layout.addWidget(flags)
-        splitter.addWidget(filters)
+        for index, widget in enumerate(
+            [
+                self.reject_without_age,
+                self.require_photo,
+                self.reject_links,
+                self.reject_mentions,
+                self.send_rejects_to_log,
+            ]
+        ):
+            flags_layout.addWidget(widget, index // 3, index % 3)
+        page.layout().addWidget(flags)
+        return page
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        actions = QGroupBox("Управление")
-        actions_layout = QFormLayout(actions)
-        self.code = QLineEdit()
-        self.password = QLineEdit()
-        self.password.setEchoMode(QLineEdit.Password)
-        send_code = QPushButton("1. Отправить код")
-        submit_code = QPushButton("2. Войти по коду")
-        submit_password = QPushButton("Войти с 2FA")
+    def _run_page(self) -> QWidget:
+        page = self.page("5. Запуск", "Старт слушателя и журнал работы")
+        actions = QHBoxLayout()
         start = QPushButton("Запуск")
+        start.setObjectName("PrimaryButton")
         stop = QPushButton("Стоп")
-        send_code.clicked.connect(self.send_code)
-        submit_code.clicked.connect(self.submit_code)
-        submit_password.clicked.connect(self.submit_password)
         start.clicked.connect(self.start)
         stop.clicked.connect(self.stop)
-        actions_layout.addRow(send_code)
-        actions_layout.addRow("Код", self.code)
-        actions_layout.addRow(submit_code)
-        actions_layout.addRow("2FA пароль", self.password)
-        actions_layout.addRow(submit_password)
-        actions_layout.addRow(start)
-        actions_layout.addRow(stop)
-        right_layout.addWidget(actions)
+        actions.addWidget(start)
+        actions.addWidget(stop)
+        actions.addStretch(1)
+        page.layout().addLayout(actions)
 
         log_box = QGroupBox("Лог")
         log_layout = QVBoxLayout(log_box)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
+        self.log.setPlaceholderText("События появятся здесь")
         log_layout.addWidget(self.log)
-        right_layout.addWidget(log_box, 1)
-        splitter.addWidget(right)
-        splitter.setSizes([650, 360])
+        page.layout().addWidget(log_box, 1)
+        return page
+
+    def set_step(self, index: int) -> None:
+        if index < 0:
+            return
+        self.stack.setCurrentIndex(index)
+        self.back_button.setEnabled(index > 0)
+        self.next_button.setText("Готово" if index == len(self.steps) - 1 else "Дальше")
+        self.status_label.setText(self.steps[index])
+
+    def next_step(self) -> None:
+        index = self.stack.currentIndex()
+        self.save_config()
+        if index < len(self.steps) - 1:
+            self.step_list.setCurrentRow(index + 1)
+
+    def previous_step(self) -> None:
+        index = self.stack.currentIndex()
+        if index > 0:
+            self.step_list.setCurrentRow(index - 1)
 
     def current_config(self) -> AppConfig:
         return AppConfig(
-            phone=self.phone.findChild(QLineEdit).text().strip(),
+            phone=self.phone.text().strip(),
             bot_token=self.bot_token.findChild(QLineEdit).text().strip(),
             notify_chat_id=self.notify_chat_id.findChild(QLineEdit).text().strip(),
             source_chat=self.source_chat.findChild(QLineEdit).text().strip() or "LeomatchBot",
@@ -226,7 +336,7 @@ class MainWindow(QMainWindow):
 
     def load_config(self) -> None:
         config = AppConfig.load()
-        self.set_line(self.phone, config.phone)
+        self.phone.setText(config.phone)
         self.set_line(self.bot_token, config.bot_token)
         self.set_line(self.notify_chat_id, config.notify_chat_id)
         self.set_line(self.source_chat, config.source_chat)
@@ -275,9 +385,9 @@ class MainWindow(QMainWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def show_core_update(self, latest: str) -> None:
-        self.core_update_button.setText(f"Обновить ядро нельзя: вышла v{latest}")
+        self.core_update_button.setText(f"Новое ядро v{latest}")
         self.core_update_button.show()
-        self.append_log(f"Вышла новая версия ядра tg-api-zapret: {latest}. Автообновление отключено.")
+        self.append_log(f"Вышла новая версия ядра tg-api-zapret: {latest}. Автообновление ядра отключено.")
 
     def show_app_update(self, release: AppRelease) -> None:
         self.latest_app_release = release
@@ -296,8 +406,8 @@ class MainWindow(QMainWindow):
 
         def worker() -> None:
             try:
-                archive_path = download_release_asset(release, config.proxy_url)
-                install_downloaded_release(archive_path)
+                installer_path = download_release_asset(release, config.proxy_url)
+                install_downloaded_release(installer_path)
             except Exception as exc:
                 self.bridge.app_update_failed.emit(str(exc))
                 return
@@ -309,9 +419,7 @@ class MainWindow(QMainWindow):
     def show_app_update_failed(self, error: str) -> None:
         self.append_log(f"Обновление не выполнено: {error}")
         if self.latest_app_release:
-            self.app_update_button.setText(
-                f"Доступно обновление v{self.latest_app_release.version}"
-            )
+            self.app_update_button.setText(f"Доступно обновление v{self.latest_app_release.version}")
             self.app_update_button.setEnabled(True)
 
     def finish_app_update(self) -> None:
@@ -351,7 +459,11 @@ class MainWindow(QMainWindow):
             updates = BotApi(config.bot_token, proxy_url=config.proxy_url).get_updates()
             items = updates.get("result") or []
             if not items:
-                QMessageBox.information(self, "Нет updates", "Сначала напишите любое сообщение своему боту.")
+                QMessageBox.information(
+                    self,
+                    "Нет updates",
+                    "Сначала напишите любое сообщение своему боту.",
+                )
                 return
             message = items[-1].get("message") or items[-1].get("edited_message") or {}
             chat_id = str((message.get("chat") or {}).get("id") or "")
@@ -379,12 +491,49 @@ class MainWindow(QMainWindow):
         self.log.appendPlainText(message.rstrip())
 
     @staticmethod
-    def line(label: str, *, password: bool = False) -> QGroupBox:
-        box = QGroupBox(label)
-        layout = QVBoxLayout(box)
+    def page(title: str, subtitle: str) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        title_label = QLabel(title)
+        title_label.setObjectName("PageTitle")
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("MutedText")
+        layout.addWidget(title_label)
+        layout.addWidget(subtitle_label)
+        return widget
+
+    @staticmethod
+    def panel() -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("Panel")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        return frame
+
+    @staticmethod
+    def badge(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("Badge")
+        label.setAlignment(Qt.AlignCenter)
+        return label
+
+    @staticmethod
+    def raw_line(label: str, *, placeholder: str = "", password: bool = False) -> QLineEdit:
         edit = QLineEdit()
+        edit.setAccessibleName(label)
+        edit.setPlaceholderText(placeholder)
         if password:
             edit.setEchoMode(QLineEdit.Password)
+        return edit
+
+    @staticmethod
+    def line(label: str, *, password: bool = False, placeholder: str = "") -> QGroupBox:
+        box = QGroupBox(label)
+        layout = QVBoxLayout(box)
+        edit = MainWindow.raw_line(label, placeholder=placeholder, password=password)
         layout.addWidget(edit)
         return box
 
@@ -395,6 +544,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(QLabel(label))
         layout.addWidget(QLineEdit())
+        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         return frame
 
     @staticmethod
@@ -402,6 +552,7 @@ class MainWindow(QMainWindow):
         box = QGroupBox(label)
         layout = QVBoxLayout(box)
         edit = QPlainTextEdit()
+        edit.setMinimumHeight(105)
         layout.addWidget(edit)
         return box
 
@@ -424,6 +575,122 @@ class MainWindow(QMainWindow):
     @staticmethod
     def set_text(box: QGroupBox, value: str) -> None:
         box.findChild(QPlainTextEdit).setPlainText(value)
+
+
+APP_STYLE = """
+QWidget#AppRoot {
+    background: #f5f7fb;
+    color: #172033;
+    font-family: "Segoe UI";
+    font-size: 10pt;
+}
+QFrame#Header {
+    background: #ffffff;
+    border: 1px solid #dfe5ef;
+    border-radius: 8px;
+}
+QFrame#Panel,
+QGroupBox {
+    background: #ffffff;
+    border: 1px solid #dfe5ef;
+    border-radius: 8px;
+    margin-top: 10px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+    color: #526073;
+}
+QLabel#AppTitle {
+    font-size: 20pt;
+    font-weight: 700;
+    color: #111827;
+}
+QLabel#PageTitle {
+    font-size: 17pt;
+    font-weight: 700;
+    color: #111827;
+}
+QLabel#MutedText,
+QLabel#StatusText {
+    color: #64748b;
+}
+QLabel#Badge {
+    background: #eef2f7;
+    border: 1px solid #d8e0eb;
+    border-radius: 8px;
+    color: #334155;
+    padding: 7px 10px;
+}
+QListWidget#StepList {
+    background: #ffffff;
+    border: 1px solid #dfe5ef;
+    border-radius: 8px;
+    padding: 8px;
+    outline: 0;
+}
+QListWidget#StepList::item {
+    border-radius: 7px;
+    padding: 12px 10px;
+    margin: 2px;
+    color: #334155;
+}
+QListWidget#StepList::item:selected {
+    background: #e7f0ff;
+    color: #0f4aa1;
+}
+QLineEdit,
+QPlainTextEdit {
+    background: #fbfdff;
+    border: 1px solid #cfd8e5;
+    border-radius: 7px;
+    padding: 8px;
+    selection-background-color: #2f80ed;
+}
+QLineEdit:focus,
+QPlainTextEdit:focus {
+    border-color: #2f80ed;
+    background: #ffffff;
+}
+QPushButton {
+    background: #ffffff;
+    border: 1px solid #cfd8e5;
+    border-radius: 7px;
+    padding: 9px 14px;
+    color: #172033;
+}
+QPushButton:hover {
+    background: #f1f5f9;
+}
+QPushButton:disabled {
+    color: #94a3b8;
+    background: #eef2f7;
+}
+QPushButton#PrimaryButton {
+    background: #1f6feb;
+    border-color: #1f6feb;
+    color: #ffffff;
+    font-weight: 600;
+}
+QPushButton#PrimaryButton:hover {
+    background: #195ec8;
+}
+QPushButton#UpdateButton {
+    background: #0f766e;
+    border-color: #0f766e;
+    color: #ffffff;
+}
+QPushButton#DisabledUpdateButton {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    color: #9a3412;
+}
+QCheckBox {
+    spacing: 8px;
+    color: #334155;
+}
+"""
 
 
 def main() -> None:
