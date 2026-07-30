@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 import threading
@@ -40,8 +41,27 @@ from avto_vinchick_tg.core_update import fetch_latest_core_version, is_newer_ver
 from avto_vinchick_tg.dv_bot import DvActionSettings
 from avto_vinchick_tg.filters import FilterSettings
 from avto_vinchick_tg.runner import VinchikRunner
-from avto_vinchick_tg.settings import AppConfig
+from avto_vinchick_tg.settings import AppConfig, default_app_dir
 from tg_api_zapret import __version__ as CORE_VERSION
+
+_theme_home = str(default_app_dir())
+_original_home = os.environ.get("HOME")
+_original_userprofile = os.environ.get("USERPROFILE")
+os.environ["HOME"] = _theme_home
+os.environ["USERPROFILE"] = _theme_home
+try:
+    from qt_material import apply_stylesheet
+except ImportError:  # pragma: no cover - packaged builds include qt-material.
+    apply_stylesheet = None
+finally:
+    if _original_home is None:
+        os.environ.pop("HOME", None)
+    else:
+        os.environ["HOME"] = _original_home
+    if _original_userprofile is None:
+        os.environ.pop("USERPROFILE", None)
+    else:
+        os.environ["USERPROFILE"] = _original_userprofile
 
 
 class LogBridge(QObject):
@@ -624,53 +644,54 @@ class MainWindow(QMainWindow):
 
 APP_STYLE = """
 QWidget#AppRoot {
-    background: #f5f7fb;
-    color: #172033;
+    background: #101820;
+    color: #e7edf5;
     font-family: "Segoe UI";
     font-size: 10pt;
 }
 QFrame#Header {
-    background: #ffffff;
-    border: 1px solid #dfe5ef;
+    background: #162230;
+    border: 1px solid #27364a;
     border-radius: 8px;
 }
 QFrame#Panel,
 QGroupBox {
-    background: #ffffff;
-    border: 1px solid #dfe5ef;
+    background: #162230;
+    border: 1px solid #27364a;
     border-radius: 8px;
     margin-top: 10px;
+    color: #e7edf5;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 12px;
     padding: 0 6px;
-    color: #526073;
+    color: #9db0c7;
 }
 QLabel#AppTitle {
     font-size: 20pt;
     font-weight: 700;
-    color: #111827;
+    color: #ffffff;
 }
 QLabel#PageTitle {
     font-size: 17pt;
     font-weight: 700;
-    color: #111827;
+    color: #ffffff;
 }
 QLabel#MutedText,
 QLabel#StatusText {
-    color: #64748b;
+    color: #9db0c7;
 }
 QLabel#Badge {
-    background: #eef2f7;
-    border: 1px solid #d8e0eb;
+    background: #203044;
+    border: 1px solid #354963;
     border-radius: 8px;
-    color: #334155;
+    color: #dce8f8;
     padding: 7px 10px;
 }
 QListWidget#StepList {
-    background: #ffffff;
-    border: 1px solid #dfe5ef;
+    background: #162230;
+    border: 1px solid #27364a;
     border-radius: 8px;
     padding: 8px;
     outline: 0;
@@ -679,38 +700,39 @@ QListWidget#StepList::item {
     border-radius: 7px;
     padding: 12px 10px;
     margin: 2px;
-    color: #334155;
+    color: #dce8f8;
 }
 QListWidget#StepList::item:selected {
-    background: #e7f0ff;
-    color: #0f4aa1;
+    background: #1f6feb;
+    color: #ffffff;
 }
 QLineEdit,
 QPlainTextEdit {
-    background: #fbfdff;
-    border: 1px solid #cfd8e5;
+    background: #0f1722;
+    border: 1px solid #354963;
     border-radius: 7px;
     padding: 8px;
+    color: #eef6ff;
     selection-background-color: #2f80ed;
 }
 QLineEdit:focus,
 QPlainTextEdit:focus {
     border-color: #2f80ed;
-    background: #ffffff;
+    background: #111d2a;
 }
 QPushButton {
-    background: #ffffff;
-    border: 1px solid #cfd8e5;
+    background: #203044;
+    border: 1px solid #354963;
     border-radius: 7px;
     padding: 9px 14px;
-    color: #172033;
+    color: #eef6ff;
 }
 QPushButton:hover {
-    background: #f1f5f9;
+    background: #293c54;
 }
 QPushButton:disabled {
-    color: #94a3b8;
-    background: #eef2f7;
+    color: #8293a8;
+    background: #1a2635;
 }
 QPushButton#PrimaryButton {
     background: #1f6feb;
@@ -727,19 +749,26 @@ QPushButton#UpdateButton {
     color: #ffffff;
 }
 QPushButton#DisabledUpdateButton {
-    background: #fff7ed;
-    border-color: #fed7aa;
-    color: #9a3412;
+    background: #3b2a16;
+    border-color: #9a6b2f;
+    color: #ffdca8;
 }
 QCheckBox {
     spacing: 8px;
-    color: #334155;
+    color: #dce8f8;
 }
 """
 
 
+def apply_app_theme(app: QApplication) -> None:
+    if apply_stylesheet is not None:
+        apply_stylesheet(app, theme="dark_blue.xml")
+    app.setStyleSheet(app.styleSheet() + "\n" + APP_STYLE)
+
+
 def main() -> None:
     app = QApplication(sys.argv)
+    apply_app_theme(app)
     icon = app_icon_path()
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))

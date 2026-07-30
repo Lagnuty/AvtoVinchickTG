@@ -11,6 +11,7 @@ MANUFACTURER = "Lagnuty"
 UPGRADE_CODE = "3F66180F-8E27-48D9-B031-58D7B165DCB4"
 DIST_DIR = Path("dist") / APP_NAME
 ICON_PATH = Path("assets") / "AvtoVinchickTG.ico"
+LICENSE_PATH = Path("installer") / "License.rtf"
 OUTPUT_PATH = Path("installer") / "AvtoVinchickTG.wxs"
 WIX_NS = "http://wixtoolset.org/schemas/v4/wxs"
 UI_NS = "http://wixtoolset.org/schemas/v4/wxs/ui"
@@ -40,6 +41,7 @@ def main() -> None:
     sub(package, "Icon", {"Id": "AppIcon.ico", "SourceFile": str(ICON_PATH)})
     sub(package, "Property", {"Id": "ARPPRODUCTICON", "Value": "AppIcon.ico"})
     sub(package, "Property", {"Id": "WIXUI_INSTALLDIR", "Value": "INSTALLFOLDER"})
+    sub(package, "WixVariable", {"Id": "WixUILicenseRtf", "Value": str(LICENSE_PATH)})
     sub_ui(package, "WixUI", {"Id": "WixUI_InstallDir"})
 
     local_app_data = sub(package, "StandardDirectory", {"Id": "LocalAppDataFolder"})
