@@ -2,7 +2,7 @@
 
 Windows GUI для Telegram-only фильтрации анкет из чата/бота Дайвинчика.
 
-В основе лежит `Lagnuty/tg-api-zapret` в папке `core`: приложение использует его Telethon-слой для входа в пользовательский Telegram-аккаунт, SOCKS5H proxy и чтение сообщений. Текущая версия приложения: `0.1.3`, ядра: `0.4.30`.
+В основе лежит `Lagnuty/tg-api-zapret` в папке `core`: приложение использует его Telethon-слой для входа в пользовательский Telegram-аккаунт, SOCKS5H proxy и чтение сообщений. Текущая версия приложения: `0.1.4`, ядра: `0.4.30`.
 
 ## Что уже есть
 
@@ -12,7 +12,7 @@ Windows GUI для Telegram-only фильтрации анкет из чата/�
 - Отправка подходящих анкет в ваш бот через Bot API.
 - Фильтры по тексту, обязательным словам, regex, количеству слов/символов, возрасту, ссылкам, mentions и наличию фото/медиа.
 - Настройки и Telegram-сессия хранятся рядом с проектом в `.data`, а в exe-сборке рядом с exe в `data`.
-- Автопроверка обновлений приложения через GitHub Releases. Если вышла новая версия, появится кнопка `Доступно обновление v...`; обновление скачивает и запускает установщик.
+- Автопроверка обновлений приложения через GitHub Releases. Если вышла новая версия, появится кнопка `Доступно обновление v...`; обновление скачивает и запускает MSI-установщик.
 
 ## Запуск из исходников
 
@@ -49,40 +49,40 @@ D:\Documents\AIprojects\tools\python\python.exe
 dist\AvtoVinchickTG\AvtoVinchickTG.exe
 ```
 
-## Сборка установщика
+## Сборка MSI
 
-Inno Setup ожидается здесь:
+WiX Toolset ожидается здесь:
 
 ```text
-D:\Documents\AIprojects\tools\InnoSetup6\ISCC.exe
+D:\Documents\AIprojects\tools\wix\wix.exe
 ```
 
 Сборка:
 
 ```powershell
-.\build_installer.ps1
+.\build_msi.ps1
 ```
 
-Готовый установщик будет здесь:
+Готовый MSI будет здесь:
 
 ```text
-dist\installer\AvtoVinchickTG-Setup-0.1.3.exe
+dist\msi\AvtoVinchickTG-0.1.4.msi
 ```
 
 ## Публикация обновления
 
 Автообновление смотрит latest release в `Lagnuty/AvtoVinchickTG`.
 
-Для релиза соберите установщик и загрузите installer asset:
+Для релиза соберите MSI и загрузите asset:
 
 ```text
-dist\installer\AvtoVinchickTG-Setup-0.1.3.exe
+dist\msi\AvtoVinchickTG-0.1.4.msi
 ```
 
-Имя asset должно содержать `AvtoVinchickTG` и `Setup`, например:
+Имя asset должно содержать `AvtoVinchickTG` и иметь расширение `.msi`, например:
 
 ```text
-AvtoVinchickTG-Setup-0.1.3.exe
+AvtoVinchickTG-0.1.4.msi
 ```
 
-Tag релиза должен быть вида `v0.1.3` или `0.1.3`. После скачивания приложение закроется, запустит установщик в silent-режиме и перезапустится.
+Tag релиза должен быть вида `v0.1.4` или `0.1.4`. После скачивания приложение закроется, запустит `msiexec` в silent-режиме и перезапустится.

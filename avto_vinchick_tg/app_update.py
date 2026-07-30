@@ -67,8 +67,8 @@ def download_release_asset(release: AppRelease, proxy_url: str = "") -> Path:
 def install_downloaded_release(archive_path: Path) -> None:
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Автообновление доступно только в exe-сборке.")
-    if archive_path.suffix.lower() != ".exe":
-        raise RuntimeError("Автообновление ожидает installer .exe из GitHub Release.")
+    if archive_path.suffix.lower() != ".msi":
+        raise RuntimeError("Автообновление ожидает MSI installer из GitHub Release.")
 
     app_exe = Path(sys.executable).resolve()
     script_path = APP_DIR / "updates" / "apply-update.ps1"
@@ -91,13 +91,12 @@ def choose_windows_asset(assets: list[dict]) -> dict | None:
     installer_assets = [
         asset
         for asset in assets
-        if str(asset.get("browser_download_url") or "").lower().endswith(".exe")
+        if str(asset.get("browser_download_url") or "").lower().endswith(".msi")
     ]
     preferred = [
         asset
         for asset in installer_assets
         if "avtovinchicktg" in str(asset.get("name") or "").casefold()
-        and "setup" in str(asset.get("name") or "").casefold()
     ]
     return (preferred or installer_assets or [None])[0]
 
@@ -117,8 +116,8 @@ $target = Split-Path -Parent $exe
 while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {{
     Start-Sleep -Milliseconds 400
 }}
-$args = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', "/DIR=$target")
-Start-Process -FilePath $installer -ArgumentList $args -Wait
+$args = @('/i', $installer, '/qn', '/norestart', "INSTALLFOLDER=$target")
+Start-Process -FilePath 'msiexec.exe' -ArgumentList $args -Wait
 Start-Process -FilePath $exe -WorkingDirectory $target
 """.strip()
     script_path.parent.mkdir(parents=True, exist_ok=True)

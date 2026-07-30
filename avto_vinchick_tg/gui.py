@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
 import sys
 import threading
 
+from PySide6.QtGui import QIcon
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
     QApplication,
@@ -49,6 +51,9 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("AvtoVinchick TG")
+        icon = app_icon_path()
+        if icon.exists():
+            self.setWindowIcon(QIcon(str(icon)))
         self.resize(1060, 760)
         self.bridge = LogBridge()
         self.bridge.message.connect(self.append_log)
@@ -423,6 +428,14 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
+    icon = app_icon_path()
+    if icon.exists():
+        app.setWindowIcon(QIcon(str(icon)))
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
+
+
+def app_icon_path() -> Path:
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / "assets" / "AvtoVinchickTG.ico"

@@ -42,12 +42,12 @@ def test_normalize_app_release_tag():
 def test_choose_windows_installer_asset():
     asset = choose_windows_asset(
         [
-            {"name": "tool.exe", "browser_download_url": "https://example.test/tool.exe"},
+            {"name": "tool.msi", "browser_download_url": "https://example.test/tool.msi"},
             {
-                "name": "AvtoVinchickTG-Setup-0.1.2.exe",
-                "browser_download_url": "https://example.test/AvtoVinchickTG-Setup-0.1.2.exe",
+                "name": "AvtoVinchickTG-0.1.2.msi",
+                "browser_download_url": "https://example.test/AvtoVinchickTG-0.1.2.msi",
             },
         ]
     )
 
-    assert asset["name"] == "AvtoVinchickTG-Setup-0.1.2.exe"
+    assert asset["name"] == "AvtoVinchickTG-0.1.2.msi"
