@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import threading
 import traceback
@@ -29,6 +29,11 @@ class VinchikRunner:
         self._thread: threading.Thread | None = None
         self._stop_event: asyncio.Event | None = None
         self._layer: TelegramLayer | None = None
+        self._login_loop: asyncio.AbstractEventLoop | None = None
+        self._login_thread: threading.Thread | None = None
+        self._login_ready = threading.Event()
+        self._login_lock = threading.Lock()
+        self._login_layer: TelegramLayer | None = None
         self._login_state: LoginState | None = None
 
     @property
@@ -37,15 +42,15 @@ class VinchikRunner:
 
     def login_send_code(self, config: AppConfig) -> None:
         self.log("Telegram: фоновая отправка кода запущена.")
-        self._run_sync(self._login_send_code(config))
+        self._run_login(lambda: self._login_send_code(config))
 
     def login_submit_code(self, code: str) -> None:
         self.log("Telegram: фоновая проверка кода запущена.")
-        self._run_sync(self._login_submit_code(code))
+        self._run_login(lambda: self._login_submit_code(code))
 
     def login_submit_password(self, password: str) -> None:
         self.log("Telegram: фоновая проверка 2FA запущена.")
-        self._run_sync(self._login_submit_password(password))
+        self._run_login(lambda: self._login_submit_password(password))
 
     def start(self, config: AppConfig) -> None:
         if self.running:
@@ -138,57 +143,98 @@ class VinchikRunner:
         self.log("Telegram: подключаюсь через указанный прокси.")
         layer = make_layer(config)
         await layer.connect()
-        self._layer = layer
+        if self._login_layer:
+            await self._login_layer.disconnect()
+        self._login_layer = layer
         self.log("Telegram: соединение установлено, проверяю доступность API.")
         health = await layer.check_connection_result()
         if not health.ok:
             self.log(f"Telegram соединение не прошло проверку: {health.error_type}: {health.message}")
+            await layer.disconnect()
+            self._login_layer = None
+            self._stop_login_loop()
             return
         self.log("Telegram: запрашиваю код у Telegram.")
         result = await layer.send_code_result(config.phone)
         if not result.ok or not result.sent_code:
             self.log(f"Код не отправлен: {result.error_type or result.status}: {result.message or ''}")
+            await layer.disconnect()
+            self._login_layer = None
+            self._stop_login_loop()
             return
         self._login_state = LoginState(result.sent_code.phone, result.sent_code.phone_code_hash)
         self.log("Код отправлен в Telegram.")
 
     async def _login_submit_code(self, code: str) -> None:
-        if not self._layer or not self._login_state:
+        if not self._login_layer or not self._login_state:
             raise RuntimeError("Сначала запросите код.")
-        result = await self._layer.sign_in_result(self._login_state, code.strip())
+        result = await self._login_layer.sign_in_result(self._login_state, code.strip())
         if result.ok:
-            await self._layer.disconnect()
+            await self._login_layer.disconnect()
+            self._login_layer = None
             self.log("Вход выполнен.")
+            self._stop_login_loop()
         elif result.password_required:
             self.log("Нужен 2FA пароль.")
         else:
             self.log(f"Вход по коду не выполнен: {result.error_type or result.status}: {result.message or ''}")
 
     async def _login_submit_password(self, password: str) -> None:
-        if not self._layer:
+        if not self._login_layer:
             raise RuntimeError("Сначала введите код.")
-        result = await self._layer.sign_in_password_result(password)
+        result = await self._login_layer.sign_in_password_result(password)
         if result.ok:
-            await self._layer.disconnect()
+            await self._login_layer.disconnect()
+            self._login_layer = None
             self.log("Вход выполнен с 2FA.")
+            self._stop_login_loop()
         else:
             self.log(f"Вход с 2FA не выполнен: {result.error_type or result.status}: {result.message or ''}")
 
-    def _run_sync(self, coro) -> None:
-        def worker() -> None:
-            loop = None
-            try:
-                with proxy_socket_lock:
-                    loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(coro)
-            except Exception:
-                self.log(traceback.format_exc())
-            finally:
-                if loop:
-                    loop.close()
+    def _run_login(self, coro_factory: Callable[[], Awaitable[None]]) -> None:
+        loop = self._ensure_login_loop()
+        asyncio.run_coroutine_threadsafe(self._login_task(coro_factory), loop)
 
-        threading.Thread(target=worker, daemon=True).start()
+    async def _login_task(self, coro_factory: Callable[[], Awaitable[None]]) -> None:
+        try:
+            await coro_factory()
+        except Exception:
+            self.log(traceback.format_exc())
+
+    def _ensure_login_loop(self) -> asyncio.AbstractEventLoop:
+        with self._login_lock:
+            if self._login_loop and self._login_thread and self._login_thread.is_alive():
+                return self._login_loop
+            self._login_ready.clear()
+            self._login_thread = threading.Thread(target=self._login_thread_main, daemon=True)
+            self._login_thread.start()
+        if not self._login_ready.wait(timeout=5):
+            raise RuntimeError("Telegram login loop was not started")
+        if not self._login_loop:
+            raise RuntimeError("Telegram login loop is unavailable")
+        return self._login_loop
+
+    def _login_thread_main(self) -> None:
+        loop = None
+        try:
+            with proxy_socket_lock:
+                loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._login_loop = loop
+            self._login_ready.set()
+            loop.run_forever()
+        except Exception:
+            self.log(traceback.format_exc())
+        finally:
+            if loop:
+                loop.close()
+            self._login_loop = None
+            self._login_thread = None
+            self._login_ready.set()
+
+    def _stop_login_loop(self) -> None:
+        if self._login_loop:
+            self._login_loop.call_soon(self._login_loop.stop)
 
 
 def make_layer(config: AppConfig) -> TelegramLayer:
