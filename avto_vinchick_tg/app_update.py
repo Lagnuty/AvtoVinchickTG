@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from avto_vinchick_tg.bot_api import run_with_optional_socks_proxy
@@ -34,7 +35,12 @@ def fetch_latest_app_release(current_version: str, proxy_url: str = "") -> AppRe
             "User-Agent": "AvtoVinchickTG",
         },
     )
-    data = run_with_optional_socks_proxy(proxy_url, lambda: read_json(request))
+    try:
+        data = run_with_optional_socks_proxy(proxy_url, lambda: read_json(request))
+    except HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
     version = normalize_tag(str(data.get("tag_name") or data.get("name") or ""))
     if not is_newer_version(version, current_version):
         return None

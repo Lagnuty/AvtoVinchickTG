@@ -204,8 +204,12 @@ class MainWindow(QMainWindow):
         card_layout.addWidget(title)
         card_layout.addWidget(subtitle)
 
-        self.proxy_url = self.line("SOCKS5H proxy", placeholder="socks5h://login:password@host:port")
-        self.proxy_url.findChild(QLineEdit).textChanged.connect(self.reset_proxy_check)
+        proxy_label = QLabel("SOCKS5H proxy")
+        proxy_label.setObjectName("FieldLabel")
+        self.proxy_url = self.raw_line("SOCKS5H proxy", placeholder="socks5h://login:password@host:port")
+        self.proxy_url.setObjectName("ProxyInput")
+        self.proxy_url.textChanged.connect(self.reset_proxy_check)
+        card_layout.addWidget(proxy_label)
         card_layout.addWidget(self.proxy_url)
 
         row = QHBoxLayout()
@@ -419,7 +423,7 @@ class MainWindow(QMainWindow):
             bot_token=self.bot_token.findChild(QLineEdit).text().strip(),
             notify_chat_id=self.notify_chat_id.findChild(QLineEdit).text().strip(),
             source_chat=self.source_chat.findChild(QLineEdit).text().strip() or "LeomatchBot",
-            proxy_url=self.proxy_url.findChild(QLineEdit).text().strip(),
+            proxy_url=self.proxy_url.text().strip(),
             filters=FilterSettings(
                 banned_text=self.text_lines(self.banned_text),
                 required_text=self.text_lines(self.required_text),
@@ -453,7 +457,7 @@ class MainWindow(QMainWindow):
         self.set_line(self.bot_token, config.bot_token)
         self.set_line(self.notify_chat_id, config.notify_chat_id)
         self.set_line(self.source_chat, config.source_chat)
-        self.set_line(self.proxy_url, config.proxy_url)
+        self.proxy_url.setText(config.proxy_url)
         self.reset_proxy_check()
         self.set_text(self.banned_text, "\n".join(config.filters.banned_text))
         self.set_text(self.required_text, "\n".join(config.filters.required_text))
@@ -500,6 +504,8 @@ class MainWindow(QMainWindow):
                 return
             if release:
                 self.bridge.app_update.emit(release)
+            else:
+                self.bridge.message.emit("Обновления приложения не найдены. Для автообновления нужен опубликованный GitHub Release с MSI.")
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -545,7 +551,7 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def check_proxy(self) -> None:
-        proxy_url = self.proxy_url.findChild(QLineEdit).text().strip()
+        proxy_url = self.proxy_url.text().strip()
         if not proxy_url:
             self.finish_proxy_check(False, "Укажите SOCKS5H-прокси")
             return
@@ -835,6 +841,10 @@ QLabel#MutedText,
 QLabel#StatusText {
     color: #9db0c7;
 }
+QLabel#FieldLabel {
+    color: #b9c9dc;
+    font-weight: 600;
+}
 QLabel#Badge {
     background: #203044;
     border: 1px solid #354963;
@@ -879,6 +889,12 @@ QPlainTextEdit {
     padding: 8px;
     color: #eef6ff;
     selection-background-color: #2f80ed;
+}
+QLineEdit#ProxyInput {
+    min-height: 34px;
+    font-size: 11pt;
+    color: #ffffff;
+    background: #0b1420;
 }
 QLineEdit:focus,
 QPlainTextEdit:focus {
