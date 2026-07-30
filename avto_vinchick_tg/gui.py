@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
@@ -22,13 +23,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from avto_vinchick_tg import __version__ as APP_VERSION
+from avto_vinchick_tg.core_update import fetch_latest_core_version, is_newer_version
 from avto_vinchick_tg.filters import FilterSettings
 from avto_vinchick_tg.runner import VinchikRunner
 from avto_vinchick_tg.settings import AppConfig
+from tg_api_zapret import __version__ as CORE_VERSION
 
 
 class LogBridge(QObject):
     message = Signal(str)
+    core_update = Signal(str)
 
 
 class MainWindow(QMainWindow):
@@ -38,14 +43,26 @@ class MainWindow(QMainWindow):
         self.resize(1060, 760)
         self.bridge = LogBridge()
         self.bridge.message.connect(self.append_log)
+        self.bridge.core_update.connect(self.show_core_update)
         self.runner = VinchikRunner(self.bridge.message.emit)
         self._build()
         self.load_config()
+        self.check_core_update()
 
     def _build(self) -> None:
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
+
+        version_row = QHBoxLayout()
+        layout.addLayout(version_row)
+        version_row.addWidget(QLabel(f"AvtoVinchick TG v{APP_VERSION}"))
+        version_row.addWidget(QLabel(f"Ядро tg-api-zapret v{CORE_VERSION}"))
+        version_row.addStretch(1)
+        self.core_update_button = QPushButton("")
+        self.core_update_button.setEnabled(False)
+        self.core_update_button.hide()
+        version_row.addWidget(self.core_update_button)
 
         top = QGridLayout()
         layout.addLayout(top)
@@ -209,6 +226,21 @@ class MainWindow(QMainWindow):
         self.reject_links.setChecked(config.filters.reject_links)
         self.reject_mentions.setChecked(config.filters.reject_mentions)
         self.send_rejects_to_log.setChecked(config.send_rejects_to_log)
+
+    def check_core_update(self) -> None:
+        config = self.current_config()
+
+        def worker() -> None:
+            latest = fetch_latest_core_version(config.proxy_url)
+            if is_newer_version(latest, CORE_VERSION):
+                self.bridge.core_update.emit(latest or "")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_core_update(self, latest: str) -> None:
+        self.core_update_button.setText(f"Обновить ядро нельзя: вышла v{latest}")
+        self.core_update_button.show()
+        self.append_log(f"Вышла новая версия ядра tg-api-zapret: {latest}. Автообновление отключено.")
 
     def save_config(self) -> None:
         self.current_config().save()

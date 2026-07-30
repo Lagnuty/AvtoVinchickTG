@@ -1,4 +1,5 @@
 from avto_vinchick_tg.filters import FilterSettings, evaluate_profile, extract_age
+from avto_vinchick_tg.core_update import is_newer_version, parse_version_py
 
 
 def test_extract_age_prefers_age_marker():
@@ -22,3 +23,12 @@ def test_accepts_profile_matching_required_regex():
 
     assert result.accepted
     assert result.age == 24
+
+
+def test_parse_core_version():
+    assert parse_version_py('__version__ = "0.4.30"') == "0.4.30"
+
+
+def test_detect_newer_core_version():
+    assert is_newer_version("0.4.30", "0.4.29")
+    assert not is_newer_version("0.4.29", "0.4.29")
