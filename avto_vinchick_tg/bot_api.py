@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import socket
+import threading
 from typing import Any
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
+
+proxy_socket_lock = threading.RLock()
 
 
 class BotApi:
@@ -57,21 +60,23 @@ def run_with_optional_socks_proxy(proxy_url: str, callback):
 
     import socks
 
-    original_socket = socket.socket
-    rdns = parsed.scheme.lower() == "socks5h"
-    socks.set_default_proxy(
-        socks.SOCKS5,
-        parsed.hostname,
-        parsed.port,
-        rdns=rdns,
-        username=parsed.username,
-        password=parsed.password,
-    )
-    socket.socket = socks.socksocket
-    try:
-        return callback()
-    finally:
-        socket.socket = original_socket
+    with proxy_socket_lock:
+        original_socket = socket.socket
+        rdns = parsed.scheme.lower() == "socks5h"
+        socks.set_default_proxy(
+            socks.SOCKS5,
+            parsed.hostname,
+            parsed.port,
+            rdns=rdns,
+            username=parsed.username,
+            password=parsed.password,
+        )
+        socket.socket = socks.socksocket
+        try:
+            return callback()
+        finally:
+            socket.socket = original_socket
+            socks.set_default_proxy()
 
 
 def split_telegram_text(text: str, limit: int = 3900) -> list[str]:

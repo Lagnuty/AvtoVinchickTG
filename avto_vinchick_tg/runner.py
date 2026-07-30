@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import threading
 import traceback
 
-from avto_vinchick_tg.bot_api import BotApi
+from avto_vinchick_tg.bot_api import BotApi, proxy_socket_lock
 from avto_vinchick_tg.dv_bot import DvMessageKind, classify_dv_message, command_for_accepted
 from avto_vinchick_tg.filters import evaluate_profile
 from avto_vinchick_tg.settings import AppConfig, SESSION_PATH
@@ -59,7 +59,8 @@ class VinchikRunner:
             self._loop.call_soon_threadsafe(self._stop_event.set)
 
     def _thread_main(self, config: AppConfig) -> None:
-        self._loop = asyncio.new_event_loop()
+        with proxy_socket_lock:
+            self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
             self._loop.run_until_complete(self._run(config))
@@ -175,10 +176,17 @@ class VinchikRunner:
 
     def _run_sync(self, coro) -> None:
         def worker() -> None:
+            loop = None
             try:
-                asyncio.run(coro)
+                with proxy_socket_lock:
+                    loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(coro)
             except Exception:
                 self.log(traceback.format_exc())
+            finally:
+                if loop:
+                    loop.close()
 
         threading.Thread(target=worker, daemon=True).start()
 
