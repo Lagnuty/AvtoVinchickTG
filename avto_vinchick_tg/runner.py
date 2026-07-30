@@ -36,12 +36,15 @@ class VinchikRunner:
         return self._thread is not None and self._thread.is_alive()
 
     def login_send_code(self, config: AppConfig) -> None:
+        self.log("Telegram: фоновая отправка кода запущена.")
         self._run_sync(self._login_send_code(config))
 
     def login_submit_code(self, code: str) -> None:
+        self.log("Telegram: фоновая проверка кода запущена.")
         self._run_sync(self._login_submit_code(code))
 
     def login_submit_password(self, password: str) -> None:
+        self.log("Telegram: фоновая проверка 2FA запущена.")
         self._run_sync(self._login_submit_password(password))
 
     def start(self, config: AppConfig) -> None:
@@ -131,13 +134,16 @@ class VinchikRunner:
             self.log("Остановлено.")
 
     async def _login_send_code(self, config: AppConfig) -> None:
+        self.log("Telegram: подключаюсь через указанный прокси.")
         layer = make_layer(config)
         await layer.connect()
         self._layer = layer
+        self.log("Telegram: соединение установлено, проверяю доступность API.")
         health = await layer.check_connection_result()
         if not health.ok:
             self.log(f"Telegram соединение не прошло проверку: {health.error_type}: {health.message}")
             return
+        self.log("Telegram: запрашиваю код у Telegram.")
         result = await layer.send_code_result(config.phone)
         if not result.ok or not result.sent_code:
             self.log(f"Код не отправлен: {result.error_type or result.status}: {result.message or ''}")

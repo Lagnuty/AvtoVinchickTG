@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+from datetime import datetime
 from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, Qt, Signal
@@ -43,7 +44,7 @@ from avto_vinchick_tg.core_update import fetch_latest_core_version, is_newer_ver
 from avto_vinchick_tg.dv_bot import DvActionSettings
 from avto_vinchick_tg.filters import FilterSettings
 from avto_vinchick_tg.runner import VinchikRunner
-from avto_vinchick_tg.settings import AppConfig, default_app_dir
+from avto_vinchick_tg.settings import APP_DIR, AppConfig, default_app_dir
 from tg_api_zapret import __version__ as CORE_VERSION
 
 _theme_home = str(default_app_dir())
@@ -152,6 +153,7 @@ class MainWindow(QMainWindow):
         nav.addWidget(self.back_button)
         nav.addWidget(self.next_button)
         content.addLayout(nav)
+        content.addWidget(self._build_log_panel())
 
         self.step_list.setCurrentRow(0)
         self.set_step(0)
@@ -360,15 +362,30 @@ class MainWindow(QMainWindow):
         actions.addWidget(stop)
         actions.addStretch(1)
         page.layout().addLayout(actions)
-
-        log_box = QGroupBox("Лог")
-        log_layout = QVBoxLayout(log_box)
-        self.log = QPlainTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setPlaceholderText("События появятся здесь")
-        log_layout.addWidget(self.log)
-        page.layout().addWidget(log_box, 1)
+        page.layout().addStretch(1)
         return page
+
+    def _build_log_panel(self) -> QWidget:
+        log_box = QGroupBox("Журнал")
+        log_box.setObjectName("LogPanel")
+        log_layout = QVBoxLayout(log_box)
+        log_layout.setContentsMargins(12, 14, 12, 12)
+        top = QHBoxLayout()
+        log_hint = QLabel("События приложения видны на всех шагах")
+        log_hint.setObjectName("MutedText")
+        clear_button = QPushButton("Очистить")
+        clear_button.clicked.connect(lambda: self.log.clear())
+        top.addWidget(log_hint, 1)
+        top.addWidget(clear_button)
+        log_layout.addLayout(top)
+        self.log = QPlainTextEdit()
+        self.log.setObjectName("LogView")
+        self.log.setReadOnly(True)
+        self.log.setMaximumBlockCount(800)
+        self.log.setFixedHeight(150)
+        self.log.setPlaceholderText("Здесь появятся проверка прокси, вход в Telegram, ошибки и действия ДВ.")
+        log_layout.addWidget(self.log)
+        return log_box
 
     def set_step(self, index: int) -> None:
         if index < 0:
@@ -583,13 +600,19 @@ class MainWindow(QMainWindow):
         self.append_log("Настройки сохранены.")
 
     def send_code(self) -> None:
+        if not self.phone.text().strip():
+            QMessageBox.critical(self, "Нет телефона", "Укажите телефон Telegram-аккаунта.")
+            return
+        self.append_log("Telegram: запрашиваю код входа.")
         self.save_config()
         self.runner.login_send_code(self.current_config())
 
     def submit_code(self) -> None:
+        self.append_log("Telegram: отправляю введенный код.")
         self.runner.login_submit_code(self.code.text())
 
     def submit_password(self) -> None:
+        self.append_log("Telegram: отправляю 2FA пароль.")
         self.runner.login_submit_password(self.password.text())
 
     def test_bot(self) -> None:
@@ -641,7 +664,24 @@ class MainWindow(QMainWindow):
         self.runner.stop()
 
     def append_log(self, message: str) -> None:
-        self.log.appendPlainText(message.rstrip())
+        text = message.rstrip()
+        if not text:
+            return
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        line = f"[{timestamp}] {text}"
+        if hasattr(self, "log"):
+            self.log.appendPlainText(line)
+        self.write_log_line(line)
+
+    @staticmethod
+    def write_log_line(line: str) -> None:
+        try:
+            log_dir = APP_DIR / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / "app.log").open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+        except OSError:
+            pass
 
     @staticmethod
     def refresh_widget_style(widget: QWidget) -> None:
@@ -758,12 +798,17 @@ QFrame#HeroPanel {
     border-radius: 8px;
 }
 QFrame#Panel,
-QGroupBox {
+QGroupBox,
+QGroupBox#LogPanel {
     background: #131f2f;
     border: 1px solid #27364a;
     border-radius: 8px;
     margin-top: 10px;
     color: #e7edf5;
+}
+QPlainTextEdit#LogView {
+    font-family: "Cascadia Mono", "Consolas";
+    font-size: 9pt;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
