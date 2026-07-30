@@ -148,6 +148,7 @@ def main() -> None:
         },
     )
     install_sequence = sub(package, "InstallExecuteSequence")
+    sub(install_sequence, "DisableRollback", {"Before": "InstallInitialize"})
     sub(
         install_sequence,
         "Custom",
