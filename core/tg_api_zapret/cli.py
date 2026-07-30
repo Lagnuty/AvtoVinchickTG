@@ -11,7 +11,6 @@ from typing import Sequence
 
 from telethon.errors import PasswordHashInvalidError, SessionPasswordNeededError
 
-from tg_api_zapret.api import ApiState, create_app
 from tg_api_zapret.client import TelegramLayer
 from tg_api_zapret.config import (
     AppSettings,
@@ -359,7 +358,14 @@ def build_layer(args: argparse.Namespace, settings: AppSettings) -> TelegramLaye
 
 
 async def run_api(args: argparse.Namespace) -> None:
-    import uvicorn
+    try:
+        import uvicorn
+        from tg_api_zapret.api import ApiState, create_app
+    except ImportError as exc:
+        raise RuntimeError(
+            "HTTP API dependencies are not installed. Install with "
+            "`python -m pip install -e '.[server]'` or `python -m pip install -r requirements-server.txt`."
+        ) from exc
 
     state = ApiState(
         config_file=args.config_file,

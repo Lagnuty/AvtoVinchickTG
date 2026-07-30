@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from typing import Any
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
+from telethon.tl import functions
 from telethon.tl.custom.dialog import Dialog
 from telethon.tl.custom.message import Message
 
@@ -21,6 +23,25 @@ UpdateHandler = Callable[[events.NewMessage.Event], Awaitable[None] | None]
 class SentCode:
     phone: str
     phone_code_hash: str
+
+
+@dataclass(frozen=True)
+class OperationResult:
+    ok: bool
+    status: str
+    error_type: str | None = None
+    message: str | None = None
+
+
+@dataclass(frozen=True)
+class AuthResult(OperationResult):
+    sent_code: SentCode | None = None
+    password_required: bool = False
+
+
+@dataclass(frozen=True)
+class ConnectionHealthResult(OperationResult):
+    connected: bool = False
 
 
 class TelegramLayer:
@@ -88,11 +109,39 @@ class TelegramLayer:
         client = await self._require_client()
         return client.is_connected()
 
+    async def check_connection_result(self) -> ConnectionHealthResult:
+        try:
+            client = await self._require_client()
+            if not client.is_connected():
+                await client.connect()
+            await client(functions.PingRequest(ping_id=0))
+            return ConnectionHealthResult(ok=True, status="ok", connected=client.is_connected())
+        except Exception as exc:
+            return ConnectionHealthResult(
+                ok=False,
+                status="error",
+                connected=False,
+                error_type=type(exc).__name__,
+                message=str(exc),
+            )
+
     async def send_code(self, phone: str) -> SentCode:
         client = await self._require_client()
         sent = await client.send_code_request(phone)
         self._persist_session()
         return SentCode(phone=phone, phone_code_hash=sent.phone_code_hash)
+
+    async def send_code_result(self, phone: str) -> AuthResult:
+        try:
+            sent_code = await self.send_code(phone)
+            return AuthResult(ok=True, status="code_sent", sent_code=sent_code)
+        except Exception as exc:
+            return AuthResult(
+                ok=False,
+                status="error",
+                error_type=type(exc).__name__,
+                message=str(exc),
+            )
 
     async def sign_in(self, sent_code: SentCode, code: str) -> None:
         client = await self._require_client()
@@ -103,10 +152,36 @@ class TelegramLayer:
         )
         self._persist_session()
 
+    async def sign_in_result(self, sent_code: SentCode, code: str) -> AuthResult:
+        try:
+            await self.sign_in(sent_code, code)
+            return AuthResult(ok=True, status="authorized")
+        except SessionPasswordNeededError:
+            return AuthResult(ok=False, status="password_required", password_required=True)
+        except Exception as exc:
+            return AuthResult(
+                ok=False,
+                status="error",
+                error_type=type(exc).__name__,
+                message=str(exc),
+            )
+
     async def sign_in_password(self, password: str) -> None:
         client = await self._require_client()
         await client.sign_in(password=password)
         self._persist_session()
+
+    async def sign_in_password_result(self, password: str) -> AuthResult:
+        try:
+            await self.sign_in_password(password)
+            return AuthResult(ok=True, status="authorized")
+        except Exception as exc:
+            return AuthResult(
+                ok=False,
+                status="error",
+                error_type=type(exc).__name__,
+                message=str(exc),
+            )
 
     async def interactive_login(
         self,
@@ -162,16 +237,36 @@ class TelegramLayer:
         handler: UpdateHandler,
         *,
         chats: Sequence[str | int] | str | int | None = None,
+        reconnect: bool = True,
+        min_reconnect_delay: float = 5.0,
+        max_reconnect_delay: float = 120.0,
     ) -> None:
-        client = await self._require_authorized_client()
+        delay = max(0.0, min_reconnect_delay)
+        while True:
+            client = await self._require_authorized_client()
 
-        async def wrapped(event: events.NewMessage.Event) -> None:
-            result = handler(event)
-            if result is not None:
-                await result
+            async def wrapped(event: events.NewMessage.Event) -> None:
+                result = handler(event)
+                if result is not None:
+                    await result
 
-        client.add_event_handler(wrapped, events.NewMessage(chats=chats))
-        await client.run_until_disconnected()
+            builder = events.NewMessage(chats=chats)
+            client.add_event_handler(wrapped, builder)
+            try:
+                await client.run_until_disconnected()
+                if not reconnect:
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if not reconnect:
+                    raise
+            finally:
+                client.remove_event_handler(wrapped, builder)
+            await asyncio.sleep(delay)
+            delay = min(max_reconnect_delay, max(min_reconnect_delay, delay * 2 if delay else min_reconnect_delay))
+            await self.disconnect()
+            await self.connect()
 
     async def _require_client(self) -> TelegramClient:
         if not self._client:

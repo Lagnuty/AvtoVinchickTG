@@ -649,6 +649,36 @@ def validate_proxy_url(proxy_url: str):
     return parsed
 
 
+@dataclass(frozen=True)
+class ProxyValidationResult:
+    ok: bool
+    scheme: str | None = None
+    host: str | None = None
+    port: int | None = None
+    rdns: bool | None = None
+    error_type: str | None = None
+    message: str | None = None
+
+
+def validate_proxy_url_result(proxy_url: str) -> ProxyValidationResult:
+    try:
+        parsed = validate_proxy_url(proxy_url)
+        scheme = parsed.scheme.lower()
+        return ProxyValidationResult(
+            ok=True,
+            scheme=scheme,
+            host=parsed.hostname,
+            port=parsed.port,
+            rdns=scheme in {"https", "socks5h"},
+        )
+    except Exception as exc:
+        return ProxyValidationResult(
+            ok=False,
+            error_type=type(exc).__name__,
+            message=str(exc),
+        )
+
+
 def normalize_accounts(accounts: list[str] | None) -> list[str]:
     values = []
     for account in accounts or ["default"]:

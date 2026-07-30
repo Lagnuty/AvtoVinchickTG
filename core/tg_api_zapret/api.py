@@ -2152,7 +2152,7 @@ def create_app(state: ApiState) -> FastAPI:
 
         token = extract_bearer_token(request.headers.get("authorization"))
         scopes = token_scopes(service, token)
-        if service.require_api_token and scopes is None and request.url.path != "/health":
+        if service.require_api_token and scopes is None and request.url.path not in {"/health", "/version"}:
             await audit_request(state, request, 401, token)
             return JSONResponse({"detail": "Missing or invalid API token"}, status_code=401)
         scope_token = REQUEST_SCOPES.set(scopes)
@@ -2257,6 +2257,15 @@ def create_app(state: ApiState) -> FastAPI:
             return JSONResponse(payload, status_code=503)
         return JSONResponse(payload)
 
+    @app.get("/version")
+    async def version() -> dict[str, Any]:
+        return {
+            "name": "tg-api-zapret",
+            "version": __version__,
+            "api_version": "0.4",
+            "changelog": "CHANGELOG.md",
+        }
+
     @app.get("/capabilities")
     async def capabilities() -> dict[str, Any]:
         return {
@@ -2264,6 +2273,15 @@ def create_app(state: ApiState) -> FastAPI:
                 "rest": {
                     "description": "Simple request/response commands.",
                     "endpoints": [
+                        "GET /health",
+                        "GET /version",
+                        "GET /capabilities",
+                        "GET /config",
+                        "GET /app/settings",
+                        "PUT /app/settings",
+                        "PATCH /app/settings",
+                        "GET /accounts",
+                        "POST /accounts",
                         "GET /dialogs",
                         "POST /accounts/connect",
                         "POST /accounts/disconnect",
@@ -3862,6 +3880,7 @@ def telegram_limit_summary(service: ServiceSettings) -> dict[str, Any]:
 def should_serialize_http_path(path: str) -> bool:
     if path in {
         "/health",
+        "/version",
         "/config",
         "/capabilities",
         "/accounts",

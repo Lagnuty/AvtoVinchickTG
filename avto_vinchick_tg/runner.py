@@ -4,10 +4,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 import threading
-import time
 import traceback
-
-from telethon.errors import SessionPasswordNeededError
 
 from avto_vinchick_tg.bot_api import BotApi
 from avto_vinchick_tg.filters import evaluate_profile
@@ -106,26 +103,38 @@ class VinchikRunner:
         layer = make_layer(config)
         await layer.connect()
         self._layer = layer
-        sent = await layer.send_code(config.phone)
-        self._login_state = LoginState(sent.phone, sent.phone_code_hash)
+        health = await layer.check_connection_result()
+        if not health.ok:
+            self.log(f"Telegram соединение не прошло проверку: {health.error_type}: {health.message}")
+            return
+        result = await layer.send_code_result(config.phone)
+        if not result.ok or not result.sent_code:
+            self.log(f"Код не отправлен: {result.error_type or result.status}: {result.message or ''}")
+            return
+        self._login_state = LoginState(result.sent_code.phone, result.sent_code.phone_code_hash)
         self.log("Код отправлен в Telegram.")
 
     async def _login_submit_code(self, code: str) -> None:
         if not self._layer or not self._login_state:
             raise RuntimeError("Сначала запросите код.")
-        try:
-            await self._layer.sign_in(self._login_state, code.strip())
+        result = await self._layer.sign_in_result(self._login_state, code.strip())
+        if result.ok:
             await self._layer.disconnect()
             self.log("Вход выполнен.")
-        except SessionPasswordNeededError:
+        elif result.password_required:
             self.log("Нужен 2FA пароль.")
+        else:
+            self.log(f"Вход по коду не выполнен: {result.error_type or result.status}: {result.message or ''}")
 
     async def _login_submit_password(self, password: str) -> None:
         if not self._layer:
             raise RuntimeError("Сначала введите код.")
-        await self._layer.sign_in_password(password)
-        await self._layer.disconnect()
-        self.log("Вход выполнен с 2FA.")
+        result = await self._layer.sign_in_password_result(password)
+        if result.ok:
+            await self._layer.disconnect()
+            self.log("Вход выполнен с 2FA.")
+        else:
+            self.log(f"Вход с 2FA не выполнен: {result.error_type or result.status}: {result.message or ''}")
 
     def _run_sync(self, coro) -> None:
         def worker() -> None:

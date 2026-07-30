@@ -1,5 +1,5 @@
-from tg_api_zapret.client import TelegramLayer
-from tg_api_zapret.config import TelegramConfig
+from tg_api_zapret.client import AuthResult, ConnectionHealthResult, OperationResult, TelegramLayer
+from tg_api_zapret.config import ProxyValidationResult, TelegramConfig, validate_proxy_url_result
 from tg_api_zapret.sessions import (
     EnvSessionBackend,
     FileSessionBackend,
@@ -17,7 +17,12 @@ __all__ = [
     "SessionBackend",
     "StaticStringSessionBackend",
     "TelegramConfig",
+    "ProxyValidationResult",
+    "validate_proxy_url_result",
     "TelegramLayer",
+    "OperationResult",
+    "AuthResult",
+    "ConnectionHealthResult",
     "BotApiAdapter",
     "TgApiZapretClient",
     "__version__",

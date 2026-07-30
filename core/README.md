@@ -12,7 +12,7 @@
 - повторное подключение без повторной авторизации;
 - высокоуровневые методы `send_message`, `get_dialogs`, `iter_messages`, `stream_updates`;
 - raw RPC через `invoke`;
-- SOCKS4, SOCKS5 и HTTP proxy через `TELEGRAM_PROXY_URL`.
+- HTTP, HTTPS, SOCKS5 и SOCKS5H proxy через `TELEGRAM_PROXY_URL`.
 
 ## Установка на Ubuntu
 
@@ -21,6 +21,22 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -e ".[dev]"
+```
+
+For embedded applications and lighter exe builds, install only the core package:
+
+```bash
+python -m pip install -e .
+# or, without editable install:
+python -m pip install -r requirements-core.txt
+```
+
+Install the HTTP API/server extras only when this process must expose REST,
+JSON-RPC, WebSocket, SSE or Queue API:
+
+```bash
+python -m pip install -e ".[server]"
+python -m pip install -r requirements-server.txt
 ```
 
 Если проект запускается прямо из папки без установки пакета, поставьте runtime-зависимости:
@@ -135,6 +151,24 @@ async def main() -> None:
 
 
 asyncio.run(main())
+```
+
+For GUI integrations, use typed result helpers when the UI should branch without
+parsing exception text:
+
+```python
+from tg_api_zapret import validate_proxy_url_result
+
+proxy = validate_proxy_url_result("socks5h://127.0.0.1:1080")
+if not proxy.ok:
+    print(proxy.error_type, proxy.message)
+
+health = await layer.check_connection_result()
+sent = await layer.send_code_result("+79990000000")
+if health.ok and sent.ok and sent.sent_code:
+    confirmed = await layer.sign_in_result(sent.sent_code, "12345")
+    if confirmed.password_required:
+        await layer.sign_in_password_result("2fa-password")
 ```
 
 ## SQLite-хранилище сессии
@@ -291,6 +325,7 @@ http://127.0.0.1:8080/docs
 - `GET /accounts/sync-state`
 - `POST /accounts/sync/difference?recovery=true`
 - `GET /health`
+- `GET /version`
 - `GET /capabilities`
 - `GET /config`
 - `PUT /config/proxy`
@@ -737,6 +772,11 @@ Implemented methods are `getMe`, `getUpdates`, `sendMessage`, `sendPhoto`, `send
 `editMessageText`, and `deleteMessage`. For everything else use native REST wrappers,
 JSON-RPC, or raw MTProto after explicitly enabling raw invoke.
 
+`bot_token_accounts` is currently stored in the local JSON config for launcher
+compatibility. Treat that config as secret material and keep it outside the
+repository; host applications can later move the token storage to Windows
+Credential Manager, Keychain, Secret Service, or another encrypted secret store.
+
 ## Python SDK API
 
 ```python
@@ -744,6 +784,7 @@ from tg_api_zapret import TgApiZapretClient
 
 client = TgApiZapretClient("http://127.0.0.1:8080")
 print(client.health())
+print(client.version())
 print(client.dialogs(account="work", limit=20))
 client.send_message("me", "hello from sdk", account="work")
 

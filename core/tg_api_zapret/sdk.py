@@ -14,6 +14,9 @@ class TgApiZapretClient:
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/health")
 
+    def version(self) -> dict[str, Any]:
+        return self._request("GET", "/version")
+
     def accounts(self) -> dict[str, Any]:
         return self._request("GET", "/accounts")
 

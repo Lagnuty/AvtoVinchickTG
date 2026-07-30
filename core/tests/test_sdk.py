@@ -1,4 +1,5 @@
 from tg_api_zapret.sdk import BotApiAdapter, TgApiZapretClient
+from tg_api_zapret.version import __version__
 
 
 def test_sdk_auth_header_and_raw_invoke(monkeypatch) -> None:
@@ -26,6 +27,21 @@ def test_sdk_auth_header_and_raw_invoke(monkeypatch) -> None:
     assert captured["path"] == "/raw/invoke"
     assert captured["query"] == {"account": "main"}
     assert captured["body"]["request"] == "users.GetFullUserRequest"
+
+
+def test_sdk_version(monkeypatch) -> None:
+    captured = {}
+
+    def fake_request(self, method, path, *, query=None, body=None):
+        captured.update({"method": method, "path": path, "query": query, "body": body})
+        return {"version": __version__}
+
+    monkeypatch.setattr(TgApiZapretClient, "_request", fake_request)
+
+    result = TgApiZapretClient("http://api").version()
+
+    assert result == {"version": __version__}
+    assert captured == {"method": "GET", "path": "/version", "query": None, "body": None}
 
 
 def test_bot_api_adapter_uses_bot_path(monkeypatch) -> None:

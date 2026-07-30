@@ -1,4 +1,4 @@
-# tg-api-zapret 0.4.29 implemented API surfaces
+# tg-api-zapret 0.4.30 implemented API surfaces
 
 This document is the stable integration reference for applications that embed
 tg-api-zapret as a Telegram MTProto core. Runtime truth is still exposed by
@@ -37,6 +37,20 @@ Recommended embedded topology:
 - Raw MTProto: `/raw/invoke` and `/mtproto/layers/{layer}/invoke`, disabled by
   default and intended for trusted admin use.
 
+## Dependency Profiles
+
+Core-only embedding does not require FastAPI, Uvicorn, or Redis:
+
+- `python -m pip install -e .`
+- `python -m pip install -r requirements-core.txt`
+
+Server/API embedding installs the HTTP and queue-facing extras:
+
+- `python -m pip install -e ".[server]"`
+- `python -m pip install -r requirements-server.txt`
+
+`requirements.txt` remains a compatibility alias for the full server runtime.
+
 ## Secure Defaults
 
 Current defaults are production-oriented:
@@ -65,6 +79,7 @@ Scope `*` is required for admin recovery/maintenance operations such as
 ### Service and Discovery
 
 - `GET /health`
+- `GET /version`
 - `GET /capabilities`
 - `GET /config`
 - `GET /app/settings`
@@ -100,6 +115,10 @@ behavior for embedding.
 Auth is incremental: send code, confirm code, then submit 2FA password only when
 Telegram requires it. Sessions are persisted by the selected session backend and
 should survive process restarts.
+
+`POST /auth/send-code` runs a Telegram connection health check first when
+`require_connection_health_before_auth=true`. This verifies the selected session
+transport/proxy before Telegram is asked to send a login code.
 
 Manual difference is an admin recovery endpoint. Normal sync is handled by
 Telethon; do not poll `GetDifference` from embedded clients.
@@ -310,6 +329,7 @@ from tg_api_zapret import TgApiZapretClient
 
 client = TgApiZapretClient("http://127.0.0.1:8080", token="dev-admin-token")
 print(client.health())
+print(client.version())
 print(client.dialogs(account="work", limit=20))
 client.send_message("me", "hello", account="work")
 ```
@@ -320,6 +340,19 @@ Use `BotApiAdapter` only for the limited compatibility surface:
 bot = client.bot_api("123456:token")
 bot.send_message("@username", "hello")
 ```
+
+Direct Python embedding can use typed result objects so GUI code does not parse
+exception strings:
+
+- `TelegramLayer.check_connection_result() -> ConnectionHealthResult`
+- `TelegramLayer.send_code_result() -> AuthResult`
+- `TelegramLayer.sign_in_result() -> AuthResult`
+- `TelegramLayer.sign_in_password_result() -> AuthResult`
+- `validate_proxy_url_result() -> ProxyValidationResult`
+
+`AuthResult.status` is stable enough for UI branching: `code_sent`,
+`password_required`, `authorized`, or `error`. `error_type` and `message` expose
+diagnostics without changing the exception-throwing low-level methods.
 
 ## Configuration Groups
 
@@ -354,6 +387,12 @@ Important groups:
   `online_debounce_max_seconds`
 - local state: `entity_cache_warmup_*`, `raw_updates_retention_days`,
   `flood_errors_retention_days`, `state_retention_*`, `state_vacuum_interval_hours`
+
+`bot_token_accounts` is still stored in the local JSON config for compatibility.
+Treat the config file as secret material and keep it outside the repository.
+Future host applications can replace this with Windows Credential Manager,
+Keychain, Secret Service, or another encrypted secret provider at the launcher
+layer.
 
 ## MTProto Definition Documents
 

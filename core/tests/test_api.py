@@ -14,6 +14,7 @@ from tg_api_zapret.api import (
     telegram_action_limit,
 )
 from tg_api_zapret.config import ServiceSettings
+from tg_api_zapret.version import __version__
 
 
 def test_docs_are_disabled_by_default(tmp_path) -> None:
@@ -23,6 +24,9 @@ def test_docs_are_disabled_by_default(tmp_path) -> None:
     client = TestClient(app)
 
     assert client.get("/health").status_code == 200
+    version = client.get("/version")
+    assert version.status_code == 200
+    assert version.json()["version"] == __version__
     assert client.get("/docs").status_code == 404
 
 
@@ -80,6 +84,7 @@ def test_capabilities_show_full_rpc_methods(tmp_path, monkeypatch) -> None:
     assert "GET /accounts/online" in rest_endpoints
     assert "GET /accounts/health" in rest_endpoints
     assert "GET /accounts/risk-status" in rest_endpoints
+    assert "GET /version" in rest_endpoints
     assert "GET /queue/status" in data["interfaces"]["queue"]["endpoints"]
     assert data["interfaces"]["queue"]["execution_owner"] == "api_process"
     assert "POST /accounts/entity-cache/warm" in rest_endpoints

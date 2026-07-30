@@ -6,7 +6,6 @@ import importlib
 import inspect
 from typing import Any, get_args, get_origin
 
-from fastapi import HTTPException
 from telethon import utils
 from telethon.tl import types
 
@@ -16,18 +15,19 @@ DATETIME_MARKER = "datetime"
 ENTITY_MARKERS = {"entity", "peer", "input_entity", "input_peer"}
 
 
+class TLCodecError(ValueError):
+    pass
+
+
 def resolve_tl_request(path: str):
     module_name, _, class_name = path.rpartition(".")
     if not module_name or not class_name:
-        raise HTTPException(
-            status_code=400,
-            detail="Use request path like users.GetFullUserRequest",
-        )
+        raise TLCodecError("Use request path like users.GetFullUserRequest")
     try:
         module = importlib.import_module(f"telethon.tl.functions.{module_name}")
         return getattr(module, class_name)
     except (ImportError, AttributeError) as exc:
-        raise HTTPException(status_code=400, detail=f"Unknown TL request: {path}") from exc
+        raise TLCodecError(f"Unknown TL request: {path}") from exc
 
 
 def resolve_tl_constructor(name: str):
@@ -36,7 +36,7 @@ def resolve_tl_constructor(name: str):
     try:
         return getattr(types, name)
     except AttributeError as exc:
-        raise HTTPException(status_code=400, detail=f"Unknown TL constructor: {name}") from exc
+        raise TLCodecError(f"Unknown TL constructor: {name}") from exc
 
 
 async def build_tl_request(path: str, fields: dict[str, Any], client: Any):
@@ -132,9 +132,9 @@ async def resolve_entity_if_needed(
 
 async def resolve_entity(value: Any, *, client: Any | None, annotation: Any = None) -> Any:
     if client is None:
-        raise HTTPException(status_code=400, detail="Entity resolver requires an authorized client")
+        raise TLCodecError("Entity resolver requires an authorized client")
     if value is None:
-        raise HTTPException(status_code=400, detail="Entity value is required")
+        raise TLCodecError("Entity value is required")
 
     annotation_text = annotation_to_text(annotation)
     if "TypeInputUser" in annotation_text:
@@ -198,7 +198,7 @@ def decode_bytes(value: dict[str, Any]) -> bytes:
         return bytes.fromhex(str(value["hex"]))
     if "utf8" in value:
         return str(value["utf8"]).encode("utf-8")
-    raise HTTPException(status_code=400, detail="bytes object requires base64, hex, or utf8")
+    raise TLCodecError("bytes object requires base64, hex, or utf8")
 
 
 def decode_datetime(value: dict[str, Any]) -> datetime:
@@ -206,7 +206,7 @@ def decode_datetime(value: dict[str, Any]) -> datetime:
         return datetime.fromtimestamp(float(value["timestamp"]), tz=timezone.utc)
     iso = str(value.get("iso") or value.get("value") or "")
     if not iso:
-        raise HTTPException(status_code=400, detail="datetime object requires iso or timestamp")
+        raise TLCodecError("datetime object requires iso or timestamp")
     return datetime.fromisoformat(iso.replace("Z", "+00:00"))
 
 

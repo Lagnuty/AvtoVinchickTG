@@ -59,6 +59,32 @@ python -m tg_api_zapret api --host 127.0.0.1 --port 8080
 
 Telegram jobs still execute in the API owner process.
 
+## Dependency Profiles
+
+The package is split for embedded builds:
+
+- core install: `Telethon`, `PySocks`, `python-socks`;
+- server extra: FastAPI, Uvicorn, Redis client;
+- dev extra: server extra plus test/lint tooling.
+
+Use core-only dependencies for GUI/exe builds that call `TelegramLayer`
+directly:
+
+```bash
+python -m pip install -e .
+# or
+python -m pip install -r requirements-core.txt
+```
+
+Use server dependencies when the process exposes REST, JSON-RPC, WebSocket, SSE
+or Queue API:
+
+```bash
+python -m pip install -e ".[server]"
+# or
+python -m pip install -r requirements-server.txt
+```
+
 ## API Boundary
 
 Use the narrowest interface that matches the task:
@@ -97,6 +123,30 @@ Connection flow:
 3. `POST /accounts/disconnect` to close it.
 
 Use `auto_connect_accounts` to restore selected accounts on API startup.
+
+For direct Python embedding, GUI code can use typed result helpers instead of
+parsing exception text:
+
+```python
+from tg_api_zapret import TelegramLayer, validate_proxy_url_result
+
+proxy = validate_proxy_url_result("socks5h://127.0.0.1:1080")
+if not proxy.ok:
+    show_proxy_error(proxy.error_type, proxy.message)
+
+health = await layer.check_connection_result()
+if health.ok:
+    sent = await layer.send_code_result("+79990000000")
+    if sent.ok and sent.sent_code:
+        confirmed = await layer.sign_in_result(sent.sent_code, code)
+        if confirmed.password_required:
+            await layer.sign_in_password_result(password)
+```
+
+HTTP auth uses the same policy: when
+`require_connection_health_before_auth=true`, `POST /auth/send-code` first
+checks the Telegram connection through the configured proxy and blocks the code
+request if the connection is unhealthy.
 
 ## Entity Handling
 
@@ -142,6 +192,7 @@ Client retry policy:
 Use these endpoints in supervisors:
 
 - `GET /health`
+- `GET /version`
 - `GET /queue/status`
 - `GET /db/writer/status`
 - `GET /db/maintenance/status`
@@ -151,6 +202,10 @@ Use these endpoints in supervisors:
 `GET /health` returns `503` when DB writer health is degraded. This should remove
 the process from readiness/load-balancer rotation, but does not necessarily mean
 the process must be killed immediately.
+
+`GET /version` is intentionally available without an API token. Launchers and
+host applications should use it for compatibility/update checks instead of
+reading `tg_api_zapret/version.py`.
 
 ## DB Writer and Local State
 
@@ -199,6 +254,11 @@ Only admin scope `*` should be allowed to:
 - run manual difference recovery;
 - resolve idempotency keys;
 - run DB vacuum migration.
+
+`bot_token_accounts` is currently stored in the local JSON config for compatibility
+with existing launchers. Treat the config file as secret material, keep it outside
+the source tree with owner-only permissions, and migrate host applications to an
+OS credential store or encrypted secret provider when available.
 
 ## Upgrade Checklist
 

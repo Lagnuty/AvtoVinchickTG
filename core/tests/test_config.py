@@ -10,6 +10,7 @@ from tg_api_zapret.config import (
     detect_system_lang_code,
     normalize_locale_code,
     parse_proxy_url,
+    validate_proxy_url_result,
 )
 
 
@@ -65,6 +66,20 @@ def test_parse_proxy_url_with_auth() -> None:
     parsed = parse_proxy_url("socks5h://user:password@127.0.0.1:1080")
 
     assert parsed == ("socks5", "127.0.0.1", 1080, True, "user", "password")
+
+
+def test_validate_proxy_url_result_is_typed() -> None:
+    valid = validate_proxy_url_result("socks5h://127.0.0.1:1080")
+    invalid = validate_proxy_url_result("ftp://127.0.0.1:21")
+
+    assert valid.ok is True
+    assert valid.scheme == "socks5h"
+    assert valid.host == "127.0.0.1"
+    assert valid.port == 1080
+    assert valid.rdns is True
+    assert invalid.ok is False
+    assert invalid.error_type == "ValueError"
+    assert invalid.message
 
 
 def test_app_settings_roundtrip(tmp_path) -> None:
