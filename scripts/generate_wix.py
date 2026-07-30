@@ -40,6 +40,19 @@ def main() -> None:
     sub(package, "MediaTemplate", {"EmbedCab": "yes"})
     sub(package, "Icon", {"Id": "AppIcon.ico", "SourceFile": str(ICON_PATH)})
     sub(package, "Property", {"Id": "ARPPRODUCTICON", "Value": "AppIcon.ico"})
+    sub(package, "Property", {"Id": "DISABLEROLLBACK", "Value": "1"})
+    install_folder_property = sub(package, "Property", {"Id": "INSTALLFOLDER"})
+    sub(
+        install_folder_property,
+        "RegistrySearch",
+        {
+            "Id": "FindExistingInstallFolder",
+            "Root": "HKCU",
+            "Key": rf"Software\{MANUFACTURER}\{APP_NAME}",
+            "Name": "InstallFolder",
+            "Type": "raw",
+        },
+    )
     sub(package, "Property", {"Id": "WIXUI_INSTALLDIR", "Value": "INSTALLFOLDER"})
     sub(package, "WixVariable", {"Id": "WixUILicenseRtf", "Value": str(LICENSE_PATH)})
     sub_ui(package, "WixUI", {"Id": "WixUI_InstallDir"})
@@ -110,6 +123,17 @@ def main() -> None:
             "Type": "integer",
             "Value": "1",
             "KeyPath": "yes",
+        },
+    )
+    sub(
+        shortcut_component,
+        "RegistryValue",
+        {
+            "Root": "HKCU",
+            "Key": rf"Software\{MANUFACTURER}\{APP_NAME}",
+            "Name": "InstallFolder",
+            "Type": "string",
+            "Value": "[INSTALLFOLDER]",
         },
     )
     sub(

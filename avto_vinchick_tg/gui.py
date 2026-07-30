@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QIcon
@@ -37,6 +38,7 @@ from avto_vinchick_tg.app_update import (
     fetch_latest_app_release,
     install_downloaded_release,
 )
+from avto_vinchick_tg.bot_api import run_with_optional_socks_proxy
 from avto_vinchick_tg.core_update import fetch_latest_core_version, is_newer_version
 from avto_vinchick_tg.dv_bot import DvActionSettings
 from avto_vinchick_tg.filters import FilterSettings
@@ -70,6 +72,7 @@ class LogBridge(QObject):
     app_update = Signal(object)
     app_update_failed = Signal(str)
     app_update_ready = Signal()
+    proxy_check_result = Signal(bool, str)
 
 
 class MainWindow(QMainWindow):
@@ -89,8 +92,10 @@ class MainWindow(QMainWindow):
         self.bridge.app_update.connect(self.show_app_update)
         self.bridge.app_update_failed.connect(self.show_app_update_failed)
         self.bridge.app_update_ready.connect(self.finish_app_update)
+        self.bridge.proxy_check_result.connect(self.finish_proxy_check)
         self.latest_app_release: AppRelease | None = None
         self.runner = VinchikRunner(self.bridge.message.emit)
+        self.proxy_checked = False
         self._build()
         self.load_config()
         self.check_core_update()
@@ -182,9 +187,38 @@ class MainWindow(QMainWindow):
         return header
 
     def _proxy_page(self) -> QWidget:
-        page = self.page("1. Прокси", "SOCKS5H для Telegram и Bot API")
-        self.proxy_url = self.line("SOCKS5H proxy", placeholder="socks5h://127.0.0.1:1080")
-        page.layout().addWidget(self.proxy_url)
+        page = self.page("1. Прокси", "Проверяем соединение до входа в Telegram")
+        card = QFrame()
+        card.setObjectName("HeroPanel")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(22, 20, 22, 20)
+        card_layout.setSpacing(14)
+
+        title = QLabel("Сначала сеть")
+        title.setObjectName("CardTitle")
+        subtitle = QLabel("Укажите SOCKS5H-прокси и проверьте доступ к Telegram API. Следующий шаг откроется только после успешной проверки.")
+        subtitle.setObjectName("MutedText")
+        subtitle.setWordWrap(True)
+        card_layout.addWidget(title)
+        card_layout.addWidget(subtitle)
+
+        self.proxy_url = self.line("SOCKS5H proxy", placeholder="socks5h://login:password@host:port")
+        self.proxy_url.findChild(QLineEdit).textChanged.connect(self.reset_proxy_check)
+        card_layout.addWidget(self.proxy_url)
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self.proxy_check_button = QPushButton("Проверить прокси")
+        self.proxy_check_button.setObjectName("PrimaryButton")
+        self.proxy_check_button.clicked.connect(self.check_proxy)
+        self.proxy_status = QLabel("Прокси не проверен")
+        self.proxy_status.setObjectName("WarningText")
+        row.addWidget(self.proxy_check_button)
+        row.addWidget(self.proxy_status, 1)
+        card_layout.addLayout(row)
+
+        page.layout().addWidget(card)
+        page.layout().addStretch(1)
         return page
 
     def _telegram_page(self) -> QWidget:
@@ -343,9 +377,16 @@ class MainWindow(QMainWindow):
         self.back_button.setEnabled(index > 0)
         self.next_button.setText("Готово" if index == len(self.steps) - 1 else "Дальше")
         self.status_label.setText(self.steps[index])
+        self.update_next_button()
 
     def next_step(self) -> None:
         index = self.stack.currentIndex()
+        if index == 0 and not self.proxy_checked:
+            self.proxy_status.setText("Сначала проверьте прокси")
+            self.proxy_status.setObjectName("ErrorText")
+            self.proxy_status.style().unpolish(self.proxy_status)
+            self.proxy_status.style().polish(self.proxy_status)
+            return
         self.save_config()
         if index < len(self.steps) - 1:
             self.step_list.setCurrentRow(index + 1)
@@ -396,6 +437,7 @@ class MainWindow(QMainWindow):
         self.set_line(self.notify_chat_id, config.notify_chat_id)
         self.set_line(self.source_chat, config.source_chat)
         self.set_line(self.proxy_url, config.proxy_url)
+        self.reset_proxy_check()
         self.set_text(self.banned_text, "\n".join(config.filters.banned_text))
         self.set_text(self.required_text, "\n".join(config.filters.required_text))
         self.set_text(self.banned_regex, "\n".join(config.filters.banned_regex))
@@ -485,6 +527,57 @@ class MainWindow(QMainWindow):
     def finish_app_update(self) -> None:
         QApplication.quit()
 
+    def check_proxy(self) -> None:
+        proxy_url = self.proxy_url.findChild(QLineEdit).text().strip()
+        if not proxy_url:
+            self.finish_proxy_check(False, "Укажите SOCKS5H-прокси")
+            return
+        if not proxy_url.casefold().startswith("socks5h://"):
+            self.finish_proxy_check(False, "Нужен формат socks5h://host:port")
+            return
+        self.proxy_checked = False
+        self.update_next_button()
+        self.proxy_check_button.setEnabled(False)
+        self.proxy_status.setText("Проверяю...")
+        self.proxy_status.setObjectName("WarningText")
+        self.refresh_widget_style(self.proxy_status)
+
+        def worker() -> None:
+            try:
+                request = Request("https://api.telegram.org", headers={"User-Agent": "AvtoVinchickTG"})
+                run_with_optional_socks_proxy(proxy_url, lambda: urlopen(request, timeout=20).read(64))
+            except Exception as exc:
+                self.bridge.proxy_check_result.emit(False, str(exc))
+                return
+            self.bridge.proxy_check_result.emit(True, "Прокси работает. Можно продолжать.")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_proxy_check(self, ok: bool, message: str) -> None:
+        self.proxy_checked = True
+        self.proxy_check_button.setEnabled(True)
+        if ok:
+            self.proxy_status.setText(message)
+            self.proxy_status.setObjectName("SuccessText")
+        else:
+            self.proxy_status.setText(f"Ошибка: {message}")
+            self.proxy_status.setObjectName("ErrorText")
+        self.refresh_widget_style(self.proxy_status)
+        self.update_next_button()
+
+    def reset_proxy_check(self) -> None:
+        self.proxy_checked = False
+        if hasattr(self, "proxy_status"):
+            self.proxy_status.setText("Прокси не проверен")
+            self.proxy_status.setObjectName("WarningText")
+            self.refresh_widget_style(self.proxy_status)
+        self.update_next_button()
+
+    def update_next_button(self) -> None:
+        if not hasattr(self, "next_button"):
+            return
+        self.next_button.setEnabled(self.stack.currentIndex() != 0 or self.proxy_checked)
+
     def save_config(self) -> None:
         self.current_config().save()
         self.append_log("Настройки сохранены.")
@@ -549,6 +642,11 @@ class MainWindow(QMainWindow):
 
     def append_log(self, message: str) -> None:
         self.log.appendPlainText(message.rstrip())
+
+    @staticmethod
+    def refresh_widget_style(widget: QWidget) -> None:
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
 
     @staticmethod
     def page(title: str, subtitle: str) -> QWidget:
@@ -650,13 +748,18 @@ QWidget#AppRoot {
     font-size: 10pt;
 }
 QFrame#Header {
-    background: #162230;
+    background: #131f2f;
     border: 1px solid #27364a;
+    border-radius: 8px;
+}
+QFrame#HeroPanel {
+    background: #131f2f;
+    border: 1px solid #2c425f;
     border-radius: 8px;
 }
 QFrame#Panel,
 QGroupBox {
-    background: #162230;
+    background: #131f2f;
     border: 1px solid #27364a;
     border-radius: 8px;
     margin-top: 10px;
@@ -670,6 +773,11 @@ QGroupBox::title {
 }
 QLabel#AppTitle {
     font-size: 20pt;
+    font-weight: 700;
+    color: #ffffff;
+}
+QLabel#CardTitle {
+    font-size: 18pt;
     font-weight: 700;
     color: #ffffff;
 }
@@ -689,8 +797,20 @@ QLabel#Badge {
     color: #dce8f8;
     padding: 7px 10px;
 }
+QLabel#SuccessText {
+    color: #6ee7a8;
+    font-weight: 600;
+}
+QLabel#ErrorText {
+    color: #ff8a8a;
+    font-weight: 600;
+}
+QLabel#WarningText {
+    color: #ffd166;
+    font-weight: 600;
+}
 QListWidget#StepList {
-    background: #162230;
+    background: #131f2f;
     border: 1px solid #27364a;
     border-radius: 8px;
     padding: 8px;
@@ -735,13 +855,13 @@ QPushButton:disabled {
     background: #1a2635;
 }
 QPushButton#PrimaryButton {
-    background: #1f6feb;
-    border-color: #1f6feb;
+    background: #2f80ed;
+    border-color: #2f80ed;
     color: #ffffff;
     font-weight: 600;
 }
 QPushButton#PrimaryButton:hover {
-    background: #195ec8;
+    background: #4d96f3;
 }
 QPushButton#UpdateButton {
     background: #0f766e;
