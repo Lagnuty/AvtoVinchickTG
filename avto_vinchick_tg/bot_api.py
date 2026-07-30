@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import socket
 import threading
+import uuid
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -24,18 +27,41 @@ class BotApi:
             payload["offset"] = offset
         return self.call("getUpdates", payload)
 
-    def send_message(self, chat_id: str, text: str) -> dict[str, Any]:
+    def send_message(self, chat_id: str, text: str, *, reply_markup: dict[str, Any] | None = None) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for chunk in split_telegram_text(text):
-            result = self.call(
-                "sendMessage",
-                {
-                    "chat_id": chat_id,
-                    "text": chunk,
-                    "disable_web_page_preview": True,
-                },
-            )
+            payload = {
+                "chat_id": chat_id,
+                "text": chunk,
+                "disable_web_page_preview": True,
+            }
+            if reply_markup:
+                payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+            result = self.call("sendMessage", payload)
         return result
+
+    def send_media(
+        self,
+        chat_id: str,
+        file_path: Path,
+        *,
+        caption: str = "",
+        reply_markup: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        method = "sendPhoto" if is_photo_file(file_path) else "sendDocument"
+        field_name = "photo" if method == "sendPhoto" else "document"
+        fields: dict[str, Any] = {"chat_id": chat_id}
+        if caption:
+            fields["caption"] = caption[:1024]
+        if reply_markup:
+            fields["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+        return self.call_multipart(method, fields, field_name, file_path)
+
+    def answer_callback_query(self, callback_query_id: str, *, text: str = "") -> dict[str, Any]:
+        payload = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        return self.call("answerCallbackQuery", payload)
 
     def call(self, method: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.token:
@@ -43,6 +69,24 @@ class BotApi:
         url = f"https://api.telegram.org/bot{self.token}/{method}"
         data = urlencode(payload or {}).encode("utf-8")
         request = Request(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        return run_with_optional_socks_proxy(self.proxy_url, lambda: read_json(request))
+
+    def call_multipart(
+        self,
+        method: str,
+        fields: dict[str, Any],
+        file_field: str,
+        file_path: Path,
+    ) -> dict[str, Any]:
+        if not self.token:
+            raise ValueError("Bot token is empty")
+        boundary = f"----AvtoVinchickTG{uuid.uuid4().hex}"
+        body = build_multipart_body(boundary, fields, file_field, file_path)
+        request = Request(
+            f"https://api.telegram.org/bot{self.token}/{method}",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
         return run_with_optional_socks_proxy(self.proxy_url, lambda: read_json(request))
 
 
@@ -88,3 +132,35 @@ def split_telegram_text(text: str, limit: int = 3900) -> list[str]:
         chunks.append(clean[:limit])
         clean = clean[limit:]
     return chunks
+
+
+def build_multipart_body(boundary: str, fields: dict[str, Any], file_field: str, file_path: Path) -> bytes:
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        parts.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
+                str(value).encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    filename = file_path.name
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    parts.extend(
+        [
+            f"--{boundary}\r\n".encode("utf-8"),
+            (
+                f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
+                f"Content-Type: {content_type}\r\n\r\n"
+            ).encode("utf-8"),
+            file_path.read_bytes(),
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+    )
+    return b"".join(parts)
+
+
+def is_photo_file(file_path: Path) -> bool:
+    return file_path.suffix.casefold() in {".jpg", ".jpeg", ".png", ".webp"}

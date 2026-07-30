@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
+import tempfile
 import threading
 import traceback
 
@@ -89,6 +91,7 @@ class VinchikRunner:
             bot.get_me()
             self.log(f"Слушаю чат: {config.source_chat}")
             client = await layer.authorized_client()
+            bot_poll_task = asyncio.create_task(self._poll_bot_commands(bot, client, config))
 
             @client.on(events_new_message(config.source_chat))
             async def handler(event):
@@ -118,11 +121,7 @@ class VinchikRunner:
 
                 result = evaluate_profile(text, config.filters, has_media=bool(message.media))
                 if result.accepted:
-                    await asyncio.to_thread(
-                        bot.send_message,
-                        config.notify_chat_id,
-                        format_profile_message(text, result),
-                    )
+                    await notify_profile(bot, client, config, message, format_profile_message(text, result))
                     command = command_for_accepted(config.dv_actions.accepted_action)
                     if command:
                         await send_dv_command(client, config.source_chat, command)
@@ -137,7 +136,40 @@ class VinchikRunner:
 
             while not self._stop_event.is_set():
                 await asyncio.sleep(0.2)
+            bot_poll_task.cancel()
             self.log("Остановлено.")
+
+    async def _poll_bot_commands(self, bot: BotApi, client, config: AppConfig) -> None:
+        offset = await asyncio.to_thread(initial_bot_update_offset, bot)
+        commands = {
+            "1": "лайк",
+            "2": "лайк с посланием",
+            "3": "пропуск",
+        }
+        while not self._stop_event or not self._stop_event.is_set():
+            try:
+                updates = await asyncio.to_thread(bot.get_updates, offset=offset, timeout=10)
+                for update in updates.get("result") or []:
+                    update_id = update.get("update_id")
+                    if isinstance(update_id, int):
+                        offset = update_id + 1
+                    message = update.get("message") or update.get("edited_message") or {}
+                    chat_id = str((message.get("chat") or {}).get("id") or "")
+                    text = str(message.get("text") or "").strip()
+                    if chat_id != str(config.notify_chat_id).strip() or text not in commands:
+                        continue
+                    await send_dv_command(client, config.source_chat, text)
+                    await asyncio.to_thread(
+                        bot.send_message,
+                        config.notify_chat_id,
+                        f"Отправил в Дайвинчик: {text} ({commands[text]}).",
+                    )
+                    self.log(f"Ответ боту: отправлена команда {text} ({commands[text]}).")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.log(f"Bot API ответы: {exc}")
+                await asyncio.sleep(2)
 
     async def _login_send_code(self, config: AppConfig) -> None:
         self.log("Telegram: подключаюсь через указанный прокси.")
@@ -258,10 +290,40 @@ async def send_dv_command(client, source_chat: str, command: str) -> None:
     await client.send_message(chat, command)
 
 
+async def notify_profile(bot: BotApi, client, config: AppConfig, message, text: str) -> None:
+    notification = with_answer_options(text)
+    if not message.media:
+        await asyncio.to_thread(bot.send_message, config.notify_chat_id, notification)
+        return
+    with tempfile.TemporaryDirectory(prefix="avto_vinchick_tg_") as temp_dir:
+        media_path = await client.download_media(message, file=temp_dir)
+        if not media_path:
+            await asyncio.to_thread(bot.send_message, config.notify_chat_id, notification)
+            return
+        await asyncio.to_thread(
+            bot.send_media,
+            config.notify_chat_id,
+            Path(media_path),
+            caption="Фото анкеты",
+        )
+        await asyncio.to_thread(bot.send_message, config.notify_chat_id, notification)
+
+
+def initial_bot_update_offset(bot: BotApi) -> int | None:
+    updates = bot.get_updates(timeout=0)
+    update_ids = [item.get("update_id") for item in updates.get("result") or [] if isinstance(item.get("update_id"), int)]
+    return max(update_ids) + 1 if update_ids else None
+
+
 def format_profile_message(text: str, result) -> str:
     header = "Анкета прошла фильтры"
     meta = f"Возраст: {result.age or 'не найден'} | слов: {result.word_count} | символов: {result.char_count}"
     return f"{header}\n{meta}\n\n{text}".strip()
+
+
+def with_answer_options(text: str) -> str:
+    options = "Ответьте этому боту цифрой:\n1 - лайк\n2 - лайк с посланием\n3 - пропустить"
+    return f"{text}\n\n{options}".strip()
 
 
 def format_service_message(text: str, kind: DvMessageKind) -> str:

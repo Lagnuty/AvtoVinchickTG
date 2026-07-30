@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -85,8 +86,8 @@ class MainWindow(QMainWindow):
         icon = app_icon_path()
         if icon.exists():
             self.setWindowIcon(QIcon(str(icon)))
-        self.resize(1120, 780)
-        self.setMinimumSize(960, 680)
+        self.resize(1120, 760)
+        self.setMinimumSize(820, 520)
         self.bridge = LogBridge()
         self.bridge.message.connect(self.append_log)
         self.bridge.core_update.connect(self.show_core_update)
@@ -120,7 +121,7 @@ class MainWindow(QMainWindow):
 
         self.step_list = QListWidget()
         self.step_list.setObjectName("StepList")
-        self.step_list.setFixedWidth(185)
+        self.step_list.setFixedWidth(165)
         for index, title in enumerate(self.steps, start=1):
             item = QListWidgetItem(f"{index}. {title}")
             item.setSizeHint(item.sizeHint().expandedTo(item.sizeHint()))
@@ -133,11 +134,11 @@ class MainWindow(QMainWindow):
         body.addLayout(content, 1)
 
         self.stack = QStackedWidget()
-        self.stack.addWidget(self._proxy_page())
-        self.stack.addWidget(self._telegram_page())
-        self.stack.addWidget(self._bot_page())
-        self.stack.addWidget(self._filters_page())
-        self.stack.addWidget(self._run_page())
+        self.stack.addWidget(self.scroll_page(self._proxy_page()))
+        self.stack.addWidget(self.scroll_page(self._telegram_page()))
+        self.stack.addWidget(self.scroll_page(self._bot_page()))
+        self.stack.addWidget(self.scroll_page(self._filters_page()))
+        self.stack.addWidget(self.scroll_page(self._run_page()))
         content.addWidget(self.stack, 1)
 
         nav = QHBoxLayout()
@@ -386,7 +387,8 @@ class MainWindow(QMainWindow):
         self.log.setObjectName("LogView")
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(800)
-        self.log.setFixedHeight(150)
+        self.log.setMinimumHeight(86)
+        self.log.setMaximumHeight(120)
         self.log.setPlaceholderText("Здесь появятся проверка прокси, вход в Telegram, ошибки и действия ДВ.")
         log_layout.addWidget(self.log)
         return log_box
@@ -709,6 +711,16 @@ class MainWindow(QMainWindow):
         return widget
 
     @staticmethod
+    def scroll_page(page: QWidget) -> QScrollArea:
+        area = QScrollArea()
+        area.setObjectName("PageScroll")
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        area.setWidget(page)
+        return area
+
+    @staticmethod
     def panel() -> QFrame:
         frame = QFrame()
         frame.setObjectName("Panel")
@@ -792,6 +804,13 @@ QWidget#AppRoot {
     color: #e7edf5;
     font-family: "Segoe UI";
     font-size: 10pt;
+}
+QScrollArea#PageScroll {
+    background: transparent;
+    border: 0;
+}
+QScrollArea#PageScroll > QWidget > QWidget {
+    background: transparent;
 }
 QFrame#Header {
     background: #131f2f;
