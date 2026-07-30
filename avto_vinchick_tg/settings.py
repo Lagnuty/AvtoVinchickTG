@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from avto_vinchick_tg.dv_bot import DvActionSettings
 from avto_vinchick_tg.filters import FilterSettings
 
 
@@ -28,6 +29,7 @@ class AppConfig:
     source_chat: str = "LeomatchBot"
     proxy_url: str = ""
     filters: FilterSettings = field(default_factory=FilterSettings)
+    dv_actions: DvActionSettings = field(default_factory=DvActionSettings)
     send_rejects_to_log: bool = True
 
     @classmethod
@@ -42,6 +44,7 @@ class AppConfig:
             source_chat=str(data.get("source_chat") or "LeomatchBot"),
             proxy_url=str(data.get("proxy_url") or ""),
             filters=FilterSettings.from_dict(data.get("filters")),
+            dv_actions=DvActionSettings.from_dict(data.get("dv_actions")),
             send_rejects_to_log=bool(data.get("send_rejects_to_log", True)),
         )
 
@@ -57,5 +60,6 @@ class AppConfig:
             "source_chat": self.source_chat,
             "proxy_url": self.proxy_url,
             "filters": self.filters.to_dict(),
+            "dv_actions": self.dv_actions.to_dict(),
             "send_rejects_to_log": self.send_rejects_to_log,
         }

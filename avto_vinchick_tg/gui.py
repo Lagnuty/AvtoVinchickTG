@@ -9,6 +9,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -36,6 +37,7 @@ from avto_vinchick_tg.app_update import (
     install_downloaded_release,
 )
 from avto_vinchick_tg.core_update import fetch_latest_core_version, is_newer_version
+from avto_vinchick_tg.dv_bot import DvActionSettings
 from avto_vinchick_tg.filters import FilterSettings
 from avto_vinchick_tg.runner import VinchikRunner
 from avto_vinchick_tg.settings import AppConfig
@@ -269,6 +271,31 @@ class MainWindow(QMainWindow):
 
     def _run_page(self) -> QWidget:
         page = self.page("5. Запуск", "Старт слушателя и журнал работы")
+        dv_box = QGroupBox("Поведение ДВ")
+        dv_layout = QGridLayout(dv_box)
+        dv_layout.setSpacing(10)
+        self.accepted_action = QComboBox()
+        self.accepted_action.addItem("Только переслать мне", "notify")
+        self.accepted_action.addItem("Переслать мне и лайкнуть: 1", "like")
+        self.accepted_action.addItem("Переслать мне и лайкнуть с посланием: 2", "like_message")
+        self.accepted_action.addItem("Переслать мне и пропустить: 3", "skip")
+        self.auto_skip_rejected = QCheckBox("Неподходящие анкеты пропускать командой 3")
+        self.auto_open_found = QCheckBox("На 'Нашел анкеты. Показать?' отвечать 1")
+        self.ignore_ads = QCheckBox("Рекламу и Premium-сообщения игнорировать")
+        self.forward_likes = QCheckBox("Лайки и взаимные симпатии пересылать мне")
+        dv_layout.addWidget(QLabel("Подходящая анкета"), 0, 0)
+        dv_layout.addWidget(self.accepted_action, 0, 1, 1, 2)
+        for index, widget in enumerate(
+            [
+                self.auto_skip_rejected,
+                self.auto_open_found,
+                self.ignore_ads,
+                self.forward_likes,
+            ],
+        ):
+            dv_layout.addWidget(widget, 1 + index // 2, index % 2)
+        page.layout().addWidget(dv_box)
+
         actions = QHBoxLayout()
         start = QPushButton("Запуск")
         start.setObjectName("PrimaryButton")
@@ -331,6 +358,14 @@ class MainWindow(QMainWindow):
                 reject_links=self.reject_links.isChecked(),
                 reject_mentions=self.reject_mentions.isChecked(),
             ),
+            dv_actions=DvActionSettings(
+                auto_skip_rejected=self.auto_skip_rejected.isChecked(),
+                accepted_action=str(self.accepted_action.currentData() or "notify"),
+                auto_open_found=self.auto_open_found.isChecked(),
+                ignore_ads=self.ignore_ads.isChecked(),
+                forward_likes=self.forward_likes.isChecked(),
+                auto_decline_like_prompts=False,
+            ),
             send_rejects_to_log=self.send_rejects_to_log.isChecked(),
         )
 
@@ -359,6 +394,11 @@ class MainWindow(QMainWindow):
         self.reject_links.setChecked(config.filters.reject_links)
         self.reject_mentions.setChecked(config.filters.reject_mentions)
         self.send_rejects_to_log.setChecked(config.send_rejects_to_log)
+        self.auto_skip_rejected.setChecked(config.dv_actions.auto_skip_rejected)
+        self.auto_open_found.setChecked(config.dv_actions.auto_open_found)
+        self.ignore_ads.setChecked(config.dv_actions.ignore_ads)
+        self.forward_likes.setChecked(config.dv_actions.forward_likes)
+        self.set_combo_value(self.accepted_action, config.dv_actions.accepted_action)
 
     def check_core_update(self) -> None:
         config = self.current_config()
@@ -575,6 +615,11 @@ class MainWindow(QMainWindow):
     @staticmethod
     def set_text(box: QGroupBox, value: str) -> None:
         box.findChild(QPlainTextEdit).setPlainText(value)
+
+    @staticmethod
+    def set_combo_value(combo: QComboBox, value: str) -> None:
+        index = combo.findData(value)
+        combo.setCurrentIndex(index if index >= 0 else 0)
 
 
 APP_STYLE = """

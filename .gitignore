@@ -6,3 +6,4 @@ __pycache__/
 installer/AvtoVinchickTG.wxs
 .wix/
 *.wixpdb
+.analysis/

@@ -7,6 +7,7 @@ import threading
 import traceback
 
 from avto_vinchick_tg.bot_api import BotApi
+from avto_vinchick_tg.dv_bot import DvMessageKind, classify_dv_message, command_for_accepted
 from avto_vinchick_tg.filters import evaluate_profile
 from avto_vinchick_tg.settings import AppConfig, SESSION_PATH
 from tg_api_zapret import FileSessionBackend, TelegramConfig, TelegramLayer
@@ -84,6 +85,28 @@ class VinchikRunner:
             async def handler(event):
                 message = event.message
                 text = message.message or ""
+                kind = classify_dv_message(text)
+
+                if kind == DvMessageKind.AD and config.dv_actions.ignore_ads:
+                    self.log("ДВ: реклама или premium-сообщение пропущены.")
+                    return
+                if kind == DvMessageKind.FOUND_PROMPT and config.dv_actions.auto_open_found:
+                    await send_dv_command(client, config.source_chat, "1")
+                    self.log("ДВ: найден список анкет, отправил 1 для показа.")
+                    return
+                if kind in {DvMessageKind.LIKE_NOTICE, DvMessageKind.MATCH_NOTICE}:
+                    if config.dv_actions.forward_likes:
+                        await asyncio.to_thread(
+                            bot.send_message,
+                            config.notify_chat_id,
+                            format_service_message(text, kind),
+                        )
+                        self.log("ДВ: уведомление о лайке/симпатии отправлено в вашего бота.")
+                    return
+                if kind != DvMessageKind.PROFILE:
+                    self.log(f"ДВ: системное сообщение пропущено ({kind.value}).")
+                    return
+
                 result = evaluate_profile(text, config.filters, has_media=bool(message.media))
                 if result.accepted:
                     await asyncio.to_thread(
@@ -91,9 +114,17 @@ class VinchikRunner:
                         config.notify_chat_id,
                         format_profile_message(text, result),
                     )
-                    self.log(f"Принято: {result.word_count} слов, возраст {result.age or 'не найден'}")
+                    command = command_for_accepted(config.dv_actions.accepted_action)
+                    if command:
+                        await send_dv_command(client, config.source_chat, command)
+                        self.log(f"ДВ: анкета принята, отправлена команда {command}.")
+                    else:
+                        self.log(f"Принято: {result.word_count} слов, возраст {result.age or 'не найден'}")
                 elif config.send_rejects_to_log:
                     self.log("Отсеяно: " + "; ".join(result.reasons[:4]))
+                if not result.accepted and config.dv_actions.auto_skip_rejected:
+                    await send_dv_command(client, config.source_chat, "3")
+                    self.log("ДВ: анкета не прошла фильтры, отправлена команда 3.")
 
             while not self._stop_event.is_set():
                 await asyncio.sleep(0.2)
@@ -160,7 +191,19 @@ def events_new_message(source_chat: str):
     return events.NewMessage(chats=chat or None)
 
 
+async def send_dv_command(client, source_chat: str, command: str) -> None:
+    chat = source_chat.strip()
+    if chat.startswith("@"):
+        chat = chat[1:]
+    await client.send_message(chat, command)
+
+
 def format_profile_message(text: str, result) -> str:
     header = "Анкета прошла фильтры"
     meta = f"Возраст: {result.age or 'не найден'} | слов: {result.word_count} | символов: {result.char_count}"
     return f"{header}\n{meta}\n\n{text}".strip()
+
+
+def format_service_message(text: str, kind: DvMessageKind) -> str:
+    title = "ДВ: лайк/интерес" if kind == DvMessageKind.LIKE_NOTICE else "ДВ: взаимная симпатия"
+    return f"{title}\n\n{text}".strip()
