@@ -36,7 +36,14 @@ def main() -> None:
             "Scope": "perUser",
         },
     )
-    sub(package, "MajorUpgrade", {"DowngradeErrorMessage": "A newer version is already installed."})
+    sub(
+        package,
+        "MajorUpgrade",
+        {
+            "DowngradeErrorMessage": "A newer version is already installed.",
+            "Schedule": "afterInstallExecute",
+        },
+    )
     sub(package, "MediaTemplate", {"EmbedCab": "yes"})
     sub(package, "Icon", {"Id": "AppIcon.ico", "SourceFile": str(ICON_PATH)})
     sub(package, "Property", {"Id": "ARPPRODUCTICON", "Value": "AppIcon.ico"})
