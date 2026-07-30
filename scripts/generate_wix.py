@@ -13,6 +13,7 @@ DIST_DIR = Path("dist") / APP_NAME
 ICON_PATH = Path("assets") / "AvtoVinchickTG.ico"
 OUTPUT_PATH = Path("installer") / "AvtoVinchickTG.wxs"
 WIX_NS = "http://wixtoolset.org/schemas/v4/wxs"
+UI_NS = "http://wixtoolset.org/schemas/v4/wxs/ui"
 
 
 def main() -> None:
@@ -21,6 +22,7 @@ def main() -> None:
         raise SystemExit(f"Build app first: {DIST_DIR / f'{APP_NAME}.exe'}")
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     ET.register_namespace("", WIX_NS)
+    ET.register_namespace("ui", UI_NS)
     wix = element("Wix")
     package = sub(
         wix,
@@ -37,6 +39,8 @@ def main() -> None:
     sub(package, "MediaTemplate", {"EmbedCab": "yes"})
     sub(package, "Icon", {"Id": "AppIcon.ico", "SourceFile": str(ICON_PATH)})
     sub(package, "Property", {"Id": "ARPPRODUCTICON", "Value": "AppIcon.ico"})
+    sub(package, "Property", {"Id": "WIXUI_INSTALLDIR", "Value": "INSTALLFOLDER"})
+    sub_ui(package, "WixUI", {"Id": "WixUI_InstallDir"})
 
     local_app_data = sub(package, "StandardDirectory", {"Id": "LocalAppDataFolder"})
     programs = sub(local_app_data, "Directory", {"Id": "ProgramsFolder", "Name": "Programs"})
@@ -106,6 +110,27 @@ def main() -> None:
             "KeyPath": "yes",
         },
     )
+    sub(
+        package,
+        "CustomAction",
+        {
+            "Id": "LaunchApplication",
+            "Directory": "INSTALLFOLDER",
+            "ExeCommand": "[INSTALLFOLDER]AvtoVinchickTG.exe",
+            "Execute": "immediate",
+            "Return": "asyncNoWait",
+        },
+    )
+    install_sequence = sub(package, "InstallExecuteSequence")
+    sub(
+        install_sequence,
+        "Custom",
+        {
+            "Action": "LaunchApplication",
+            "After": "InstallFinalize",
+            "Condition": "NOT Installed AND UILevel >= 5",
+        },
+    )
 
     feature = sub(package, "Feature", {"Id": "MainFeature", "Title": APP_NAME, "Level": "1"})
     sub(feature, "ComponentGroupRef", {"Id": "AppFiles"})
@@ -152,6 +177,10 @@ def element(tag: str, attrs: dict[str, str] | None = None) -> ET.Element:
 
 def sub(parent: ET.Element, tag: str, attrs: dict[str, str] | None = None) -> ET.Element:
     return ET.SubElement(parent, f"{{{WIX_NS}}}{tag}", attrs or {})
+
+
+def sub_ui(parent: ET.Element, tag: str, attrs: dict[str, str] | None = None) -> ET.Element:
+    return ET.SubElement(parent, f"{{{UI_NS}}}{tag}", attrs or {})
 
 
 def indent(elem: ET.Element, level: int = 0) -> None:

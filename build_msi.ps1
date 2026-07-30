@@ -9,6 +9,7 @@ function Run-Step {
 
 $python = ".venv\Scripts\python.exe"
 $wix = "D:\Documents\AIprojects\tools\wix\wix.exe"
+$env:DOTNET_CLI_HOME = "D:\Documents\AIprojects\tools\dotnet-home"
 
 if (-not (Test-Path $python)) {
     $python = "python"
@@ -25,5 +26,5 @@ if ($LASTEXITCODE -ne 0) {
 Run-Step $python @("scripts\generate_wix.py")
 $version = (Select-String -Path "avto_vinchick_tg\__init__.py" -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value
 New-Item -ItemType Directory -Force -Path "dist\msi" | Out-Null
-Run-Step $wix @("build", "installer\AvtoVinchickTG.wxs", "-o", "dist\msi\AvtoVinchickTG-$version.msi")
+Run-Step $wix @("build", "installer\AvtoVinchickTG.wxs", "-ext", "WixToolset.UI.wixext", "-o", "dist\msi\AvtoVinchickTG-$version.msi")
 Write-Host "MSI: dist\msi\AvtoVinchickTG-$version.msi"
