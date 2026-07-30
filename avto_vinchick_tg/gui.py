@@ -24,6 +24,12 @@ from PySide6.QtWidgets import (
 )
 
 from avto_vinchick_tg import __version__ as APP_VERSION
+from avto_vinchick_tg.app_update import (
+    AppRelease,
+    download_release_asset,
+    fetch_latest_app_release,
+    install_downloaded_release,
+)
 from avto_vinchick_tg.core_update import fetch_latest_core_version, is_newer_version
 from avto_vinchick_tg.filters import FilterSettings
 from avto_vinchick_tg.runner import VinchikRunner
@@ -34,6 +40,9 @@ from tg_api_zapret import __version__ as CORE_VERSION
 class LogBridge(QObject):
     message = Signal(str)
     core_update = Signal(str)
+    app_update = Signal(object)
+    app_update_failed = Signal(str)
+    app_update_ready = Signal()
 
 
 class MainWindow(QMainWindow):
@@ -44,10 +53,15 @@ class MainWindow(QMainWindow):
         self.bridge = LogBridge()
         self.bridge.message.connect(self.append_log)
         self.bridge.core_update.connect(self.show_core_update)
+        self.bridge.app_update.connect(self.show_app_update)
+        self.bridge.app_update_failed.connect(self.show_app_update_failed)
+        self.bridge.app_update_ready.connect(self.finish_app_update)
+        self.latest_app_release: AppRelease | None = None
         self.runner = VinchikRunner(self.bridge.message.emit)
         self._build()
         self.load_config()
         self.check_core_update()
+        self.check_app_update()
 
     def _build(self) -> None:
         root = QWidget()
@@ -59,6 +73,10 @@ class MainWindow(QMainWindow):
         version_row.addWidget(QLabel(f"AvtoVinchick TG v{APP_VERSION}"))
         version_row.addWidget(QLabel(f"Ядро tg-api-zapret v{CORE_VERSION}"))
         version_row.addStretch(1)
+        self.app_update_button = QPushButton("")
+        self.app_update_button.clicked.connect(self.download_app_update)
+        self.app_update_button.hide()
+        version_row.addWidget(self.app_update_button)
         self.core_update_button = QPushButton("")
         self.core_update_button.setEnabled(False)
         self.core_update_button.hide()
@@ -237,10 +255,62 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def check_app_update(self) -> None:
+        config = self.current_config()
+
+        def worker() -> None:
+            try:
+                release = fetch_latest_app_release(APP_VERSION, config.proxy_url)
+            except Exception as exc:
+                self.bridge.message.emit(f"Не удалось проверить обновление приложения: {exc}")
+                return
+            if release:
+                self.bridge.app_update.emit(release)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def show_core_update(self, latest: str) -> None:
         self.core_update_button.setText(f"Обновить ядро нельзя: вышла v{latest}")
         self.core_update_button.show()
         self.append_log(f"Вышла новая версия ядра tg-api-zapret: {latest}. Автообновление отключено.")
+
+    def show_app_update(self, release: AppRelease) -> None:
+        self.latest_app_release = release
+        self.app_update_button.setText(f"Доступно обновление v{release.version}")
+        self.app_update_button.setEnabled(True)
+        self.app_update_button.show()
+        self.append_log(f"Доступно обновление приложения: v{release.version}.")
+
+    def download_app_update(self) -> None:
+        release = self.latest_app_release
+        if not release:
+            return
+        self.app_update_button.setEnabled(False)
+        self.app_update_button.setText(f"Скачиваю v{release.version}...")
+        config = self.current_config()
+
+        def worker() -> None:
+            try:
+                archive_path = download_release_asset(release, config.proxy_url)
+                install_downloaded_release(archive_path)
+            except Exception as exc:
+                self.bridge.app_update_failed.emit(str(exc))
+                return
+            self.bridge.message.emit("Обновление скачано. Приложение закроется и перезапустится.")
+            self.bridge.app_update_ready.emit()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_app_update_failed(self, error: str) -> None:
+        self.append_log(f"Обновление не выполнено: {error}")
+        if self.latest_app_release:
+            self.app_update_button.setText(
+                f"Доступно обновление v{self.latest_app_release.version}"
+            )
+            self.app_update_button.setEnabled(True)
+
+    def finish_app_update(self) -> None:
+        QApplication.quit()
 
     def save_config(self) -> None:
         self.current_config().save()

@@ -1,5 +1,6 @@
 from avto_vinchick_tg.filters import FilterSettings, evaluate_profile, extract_age
 from avto_vinchick_tg.core_update import is_newer_version, parse_version_py
+from avto_vinchick_tg.app_update import choose_windows_asset, normalize_tag
 
 
 def test_extract_age_prefers_age_marker():
@@ -32,3 +33,21 @@ def test_parse_core_version():
 def test_detect_newer_core_version():
     assert is_newer_version("0.4.30", "0.4.29")
     assert not is_newer_version("0.4.29", "0.4.29")
+
+
+def test_normalize_app_release_tag():
+    assert normalize_tag("v0.1.2") == "0.1.2"
+
+
+def test_choose_windows_zip_asset():
+    asset = choose_windows_asset(
+        [
+            {"name": "source.zip", "browser_download_url": "https://example.test/source.zip"},
+            {
+                "name": "AvtoVinchickTG-0.1.2.zip",
+                "browser_download_url": "https://example.test/AvtoVinchickTG-0.1.2.zip",
+            },
+        ]
+    )
+
+    assert asset["name"] == "AvtoVinchickTG-0.1.2.zip"
