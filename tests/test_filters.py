@@ -39,15 +39,15 @@ def test_normalize_app_release_tag():
     assert normalize_tag("v0.1.2") == "0.1.2"
 
 
-def test_choose_windows_zip_asset():
+def test_choose_windows_installer_asset():
     asset = choose_windows_asset(
         [
-            {"name": "source.zip", "browser_download_url": "https://example.test/source.zip"},
+            {"name": "tool.exe", "browser_download_url": "https://example.test/tool.exe"},
             {
-                "name": "AvtoVinchickTG-0.1.2.zip",
-                "browser_download_url": "https://example.test/AvtoVinchickTG-0.1.2.zip",
+                "name": "AvtoVinchickTG-Setup-0.1.2.exe",
+                "browser_download_url": "https://example.test/AvtoVinchickTG-Setup-0.1.2.exe",
             },
         ]
     )
 
-    assert asset["name"] == "AvtoVinchickTG-0.1.2.zip"
+    assert asset["name"] == "AvtoVinchickTG-Setup-0.1.2.exe"

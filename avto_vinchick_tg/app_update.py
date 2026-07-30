@@ -6,7 +6,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import zipfile
 from urllib.request import Request, urlopen
 
 from avto_vinchick_tg.bot_api import run_with_optional_socks_proxy
@@ -68,21 +67,12 @@ def download_release_asset(release: AppRelease, proxy_url: str = "") -> Path:
 def install_downloaded_release(archive_path: Path) -> None:
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Автообновление доступно только в exe-сборке.")
-    if archive_path.suffix.lower() != ".zip":
-        raise RuntimeError("Автообновление ожидает zip-архив из GitHub Release.")
+    if archive_path.suffix.lower() != ".exe":
+        raise RuntimeError("Автообновление ожидает installer .exe из GitHub Release.")
 
     app_exe = Path(sys.executable).resolve()
-    app_dir = app_exe.parent
-    extract_dir = APP_DIR / "updates" / archive_path.stem
-    if extract_dir.exists():
-        shutil.rmtree(extract_dir)
-    extract_dir.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive_path) as archive:
-        archive.extractall(extract_dir)
-
-    source_dir = find_payload_dir(extract_dir)
     script_path = APP_DIR / "updates" / "apply-update.ps1"
-    write_update_script(script_path, source_dir, app_dir, app_exe, os_pid())
+    write_update_script(script_path, archive_path, app_exe, os_pid())
     subprocess.Popen(
         [
             "powershell.exe",
@@ -98,43 +88,37 @@ def install_downloaded_release(archive_path: Path) -> None:
 
 
 def choose_windows_asset(assets: list[dict]) -> dict | None:
-    zip_assets = [
+    installer_assets = [
         asset
         for asset in assets
-        if str(asset.get("browser_download_url") or "").lower().endswith(".zip")
+        if str(asset.get("browser_download_url") or "").lower().endswith(".exe")
     ]
     preferred = [
         asset
-        for asset in zip_assets
+        for asset in installer_assets
         if "avtovinchicktg" in str(asset.get("name") or "").casefold()
+        and "setup" in str(asset.get("name") or "").casefold()
     ]
-    return (preferred or zip_assets or [None])[0]
-
-
-def find_payload_dir(extract_dir: Path) -> Path:
-    exe_matches = list(extract_dir.rglob("AvtoVinchickTG.exe"))
-    if not exe_matches:
-        raise RuntimeError("В архиве обновления не найден AvtoVinchickTG.exe.")
-    return exe_matches[0].parent
+    return (preferred or installer_assets or [None])[0]
 
 
 def write_update_script(
     script_path: Path,
-    source_dir: Path,
-    app_dir: Path,
+    installer_path: Path,
     app_exe: Path,
     pid: int,
 ) -> None:
     script = f"""
 $ErrorActionPreference = "Stop"
 $pidToWait = {pid}
-$source = {ps_quote(source_dir)}
-$target = {ps_quote(app_dir)}
+$installer = {ps_quote(installer_path)}
 $exe = {ps_quote(app_exe)}
+$target = Split-Path -Parent $exe
 while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {{
     Start-Sleep -Milliseconds 400
 }}
-Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
+$args = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', "/DIR=$target")
+Start-Process -FilePath $installer -ArgumentList $args -Wait
 Start-Process -FilePath $exe -WorkingDirectory $target
 """.strip()
     script_path.parent.mkdir(parents=True, exist_ok=True)
