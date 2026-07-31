@@ -12,6 +12,7 @@ from avto_vinchick_tg.bot_api import BotApi, proxy_socket_lock
 from avto_vinchick_tg.dv_bot import DvMessageKind, classify_dv_message, command_for_accepted
 from avto_vinchick_tg.filters import evaluate_profile
 from avto_vinchick_tg.settings import AppConfig, SESSION_PATH
+from avto_vinchick_tg.taste_model import TasteModel
 from tg_api_zapret import FileSessionBackend, TelegramConfig, TelegramLayer
 
 
@@ -37,6 +38,8 @@ class VinchikRunner:
         self._login_lock = threading.Lock()
         self._login_layer: TelegramLayer | None = None
         self._login_state: LoginState | None = None
+        self._taste_model = TasteModel()
+        self._pending_profile_text: str | None = None
 
     @property
     def running(self) -> bool:
@@ -121,7 +124,25 @@ class VinchikRunner:
 
                 result = evaluate_profile(text, config.filters, has_media=bool(message.media))
                 if result.accepted:
+                    if config.taste.enabled:
+                        prediction = self._taste_model.predict(text, min_samples=config.taste.min_samples)
+                        if prediction.trained and prediction.score < config.taste.min_score:
+                            self.log(
+                                f"ML: анкета отсеяна по описанию, score {prediction.score}/100 "
+                                f"< {config.taste.min_score}/100."
+                            )
+                            if config.dv_actions.auto_skip_rejected:
+                                await send_dv_command(client, config.source_chat, "3")
+                            return
+                        if prediction.trained:
+                            self.log(f"ML: анкета прошла по описанию, score {prediction.score}/100.")
+                        else:
+                            self.log(
+                                f"ML: мало обучающих оценок "
+                                f"({prediction.total_samples}/{config.taste.min_samples}), анкета пропущена к вам."
+                            )
                     await notify_profile(bot, client, config, message, format_profile_message(text, result))
+                    self._pending_profile_text = text
                     command = command_for_accepted(config.dv_actions.accepted_action)
                     if command:
                         await send_dv_command(client, config.source_chat, command)
@@ -144,7 +165,8 @@ class VinchikRunner:
         commands = {
             "1": "лайк",
             "2": "лайк с посланием",
-            "3": "пропуск",
+            "3": "не понравилась внешность",
+            "4": "не понравилось описание",
         }
         while not self._stop_event or not self._stop_event.is_set():
             try:
@@ -158,13 +180,24 @@ class VinchikRunner:
                     text = str(message.get("text") or "").strip()
                     if chat_id != str(config.notify_chat_id).strip() or text not in commands:
                         continue
-                    await send_dv_command(client, config.source_chat, text)
+                    dv_command = "3" if text == "4" else text
+                    await send_dv_command(client, config.source_chat, dv_command)
+                    if self._pending_profile_text and text in {"1", "2", "4"}:
+                        learned = await asyncio.to_thread(self._taste_model.learn, self._pending_profile_text, text)
+                        if learned:
+                            if text == "4":
+                                self.log("ML: дообучил вкус отрицательным примером по описанию.")
+                            else:
+                                self.log("ML: дообучил вкус положительным примером.")
+                        self._pending_profile_text = None
+                    elif text == "3":
+                        self._pending_profile_text = None
                     await asyncio.to_thread(
                         bot.send_message,
                         config.notify_chat_id,
-                        f"Отправил в Дайвинчик: {text} ({commands[text]}).",
+                        f"Отправил в Дайвинчик: {dv_command} ({commands[text]}).",
                     )
-                    self.log(f"Ответ боту: отправлена команда {text} ({commands[text]}).")
+                    self.log(f"Ответ боту: отправлена команда {dv_command} ({commands[text]}).")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -322,7 +355,13 @@ def format_profile_message(text: str, result) -> str:
 
 
 def with_answer_options(text: str) -> str:
-    options = "Ответьте этому боту цифрой:\n1 - лайк\n2 - лайк с посланием\n3 - пропустить"
+    options = (
+        "Ответьте этому боту цифрой:\n"
+        "1 - понравилась анкета\n"
+        "2 - понравилась, лайк с посланием\n"
+        "3 - не понравилась внешность\n"
+        "4 - не понравилось описание"
+    )
     return f"{text}\n\n{options}".strip()
 
 

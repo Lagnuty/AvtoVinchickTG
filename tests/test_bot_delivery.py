@@ -11,9 +11,10 @@ class BotDeliveryTest(TestCase):
     def test_answer_options_are_visible(self) -> None:
         text = with_answer_options("Анкета")
 
-        self.assertIn("1 - лайк", text)
-        self.assertIn("2 - лайк с посланием", text)
-        self.assertIn("3 - пропустить", text)
+        self.assertIn("1 - понравилась анкета", text)
+        self.assertIn("2 - понравилась, лайк с посланием", text)
+        self.assertIn("3 - не понравилась внешность", text)
+        self.assertIn("4 - не понравилось описание", text)
 
     def test_photo_detection(self) -> None:
         self.assertTrue(is_photo_file(Path("profile.JPG")))

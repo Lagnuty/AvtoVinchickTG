@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QFrame,
+    QFileDialog,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -43,9 +44,11 @@ from avto_vinchick_tg.app_update import (
 from avto_vinchick_tg.bot_api import run_with_optional_socks_proxy
 from avto_vinchick_tg.core_update import fetch_latest_core_version, is_newer_version
 from avto_vinchick_tg.dv_bot import DvActionSettings
+from avto_vinchick_tg.filter_profile import FilterProfile, load_filter_profile, save_filter_profile
 from avto_vinchick_tg.filters import FilterSettings
 from avto_vinchick_tg.runner import VinchikRunner
 from avto_vinchick_tg.settings import APP_DIR, AppConfig, default_app_dir
+from avto_vinchick_tg.taste_model import TasteModel, TasteSettings
 from tg_api_zapret import __version__ as CORE_VERSION
 
 _theme_home = str(default_app_dir())
@@ -328,6 +331,26 @@ class MainWindow(QMainWindow):
         ):
             flags_layout.addWidget(widget, index // 3, index % 3)
         page.layout().addWidget(flags)
+
+        taste_box = QGroupBox("ML вкус по описанию")
+        taste_layout = QGridLayout(taste_box)
+        taste_layout.setSpacing(10)
+        self.taste_enabled = QCheckBox("Включить ML-отбор после обычных фильтров")
+        self.taste_min_score = self.small_line("Мин. score 0-100")
+        self.taste_min_samples = self.small_line("Мин. оценок до отбора")
+        import_button = QPushButton("Импорт Telegram export")
+        import_button.clicked.connect(self.import_taste_export)
+        import_filters_button = QPushButton("Импорт фильтров JSON")
+        import_filters_button.clicked.connect(self.import_filter_profile)
+        export_filters_button = QPushButton("Экспорт фильтров JSON")
+        export_filters_button.clicked.connect(self.export_filter_profile)
+        taste_layout.addWidget(self.taste_enabled, 0, 0, 1, 2)
+        taste_layout.addWidget(self.taste_min_score, 1, 0)
+        taste_layout.addWidget(self.taste_min_samples, 1, 1)
+        taste_layout.addWidget(import_button, 2, 0)
+        taste_layout.addWidget(import_filters_button, 2, 1)
+        taste_layout.addWidget(export_filters_button, 3, 0, 1, 2)
+        page.layout().addWidget(taste_box)
         return page
 
     def _run_page(self) -> QWidget:
@@ -442,6 +465,11 @@ class MainWindow(QMainWindow):
                 reject_links=self.reject_links.isChecked(),
                 reject_mentions=self.reject_mentions.isChecked(),
             ),
+            taste=TasteSettings(
+                enabled=self.taste_enabled.isChecked(),
+                min_score=self.int_value(self.taste_min_score) or 55,
+                min_samples=self.int_value(self.taste_min_samples) or 8,
+            ),
             dv_actions=DvActionSettings(
                 auto_skip_rejected=self.auto_skip_rejected.isChecked(),
                 accepted_action=str(self.accepted_action.currentData() or "notify"),
@@ -461,29 +489,34 @@ class MainWindow(QMainWindow):
         self.set_line(self.source_chat, config.source_chat)
         self.proxy_url.setText(config.proxy_url)
         self.reset_proxy_check()
-        self.set_text(self.banned_text, "\n".join(config.filters.banned_text))
-        self.set_text(self.required_text, "\n".join(config.filters.required_text))
-        self.set_text(self.banned_regex, "\n".join(config.filters.banned_regex))
-        self.set_text(self.required_regex, "\n".join(config.filters.required_regex))
-        for widget, value in [
-            (self.min_words, config.filters.min_words),
-            (self.max_words, config.filters.max_words),
-            (self.min_chars, config.filters.min_chars),
-            (self.max_chars, config.filters.max_chars),
-            (self.min_age, config.filters.min_age),
-            (self.max_age, config.filters.max_age),
-        ]:
-            self.set_line(widget, str(value or ""))
-        self.reject_without_age.setChecked(config.filters.reject_without_age)
-        self.require_photo.setChecked(config.filters.require_photo)
-        self.reject_links.setChecked(config.filters.reject_links)
-        self.reject_mentions.setChecked(config.filters.reject_mentions)
-        self.send_rejects_to_log.setChecked(config.send_rejects_to_log)
+        self.apply_filter_profile(FilterProfile(config.filters, config.taste))
         self.auto_skip_rejected.setChecked(config.dv_actions.auto_skip_rejected)
         self.auto_open_found.setChecked(config.dv_actions.auto_open_found)
         self.ignore_ads.setChecked(config.dv_actions.ignore_ads)
         self.forward_likes.setChecked(config.dv_actions.forward_likes)
         self.set_combo_value(self.accepted_action, config.dv_actions.accepted_action)
+
+    def apply_filter_profile(self, profile: FilterProfile) -> None:
+        self.set_text(self.banned_text, "\n".join(profile.filters.banned_text))
+        self.set_text(self.required_text, "\n".join(profile.filters.required_text))
+        self.set_text(self.banned_regex, "\n".join(profile.filters.banned_regex))
+        self.set_text(self.required_regex, "\n".join(profile.filters.required_regex))
+        for widget, value in [
+            (self.min_words, profile.filters.min_words),
+            (self.max_words, profile.filters.max_words),
+            (self.min_chars, profile.filters.min_chars),
+            (self.max_chars, profile.filters.max_chars),
+            (self.min_age, profile.filters.min_age),
+            (self.max_age, profile.filters.max_age),
+        ]:
+            self.set_line(widget, str(value or ""))
+        self.reject_without_age.setChecked(profile.filters.reject_without_age)
+        self.require_photo.setChecked(profile.filters.require_photo)
+        self.reject_links.setChecked(profile.filters.reject_links)
+        self.reject_mentions.setChecked(profile.filters.reject_mentions)
+        self.taste_enabled.setChecked(profile.taste.enabled)
+        self.set_line(self.taste_min_score, str(profile.taste.min_score))
+        self.set_line(self.taste_min_samples, str(profile.taste.min_samples))
 
     def check_core_update(self) -> None:
         config = self.current_config()
@@ -659,6 +692,32 @@ class MainWindow(QMainWindow):
             self.append_log(f"chat_id найден: {chat_id}")
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка Bot API", str(exc))
+
+    def import_taste_export(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите Telegram export",
+            str(APP_DIR.parent),
+            "Telegram export (*.zip *.json);;Все файлы (*.*)",
+        )
+        if not path:
+            return
+        self.save_config()
+        self.append_log("ML: импортирую Telegram export.")
+
+        def worker() -> None:
+            try:
+                result = TasteModel().import_export(Path(path))
+            except Exception as exc:
+                self.bridge.message.emit(f"ML: импорт не выполнен: {exc}")
+                return
+            self.bridge.message.emit(
+                "ML: импорт завершен. "
+                f"Оценок: {result.imported}, положительных: {result.positive}, "
+                f"отрицательных по описанию: {result.negative}, пропущено без обучения: {result.skipped}."
+            )
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def start(self) -> None:
         config = self.current_config()
