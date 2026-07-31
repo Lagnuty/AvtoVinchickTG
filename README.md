@@ -1,8 +1,8 @@
-# AvtoVinchickTG
+﻿# AvtoVinchickTG
 
 Windows tray-приложение с локальной web-панелью для Telegram-only фильтрации анкет из чата/бота Дайвинчика.
 
-В основе лежит `Lagnuty/tg-api-zapret` в папке `core`: приложение использует его Telethon-слой для входа в пользовательский Telegram-аккаунт, SOCKS5H proxy и чтение сообщений. Текущая версия приложения: `0.2.1`, ядра: `0.4.30`.
+В основе лежит `Lagnuty/tg-api-zapret` в папке `core`: приложение использует его Telethon-слой для входа в пользовательский Telegram-аккаунт, SOCKS5H proxy и чтение сообщений. Текущая версия приложения: `0.2.9`, ядра: `0.4.30`.
 
 ## Что уже есть
 
@@ -82,7 +82,7 @@ MSI запускается как обычный wizard и дает выбрат
 Готовый MSI будет здесь:
 
 ```text
-dist\msi\AvtoVinchickTG-0.2.1.msi
+dist\msi\AvtoVinchickTG-0.2.9.msi
 ```
 
 ## Публикация обновления
@@ -92,13 +92,21 @@ dist\msi\AvtoVinchickTG-0.2.1.msi
 Для релиза соберите MSI и загрузите asset:
 
 ```text
-dist\msi\AvtoVinchickTG-0.2.1.msi
+dist\msi\AvtoVinchickTG-0.2.9.msi
 ```
 
 Имя asset должно содержать `AvtoVinchickTG` и иметь расширение `.msi`, например:
 
 ```text
-AvtoVinchickTG-0.2.1.msi
+AvtoVinchickTG-0.2.9.msi
 ```
 
-Tag релиза лучше делать вида `v0.2.1` или `0.2.1`, но автообновление также умеет tag вроде `release`, если версия есть в имени MSI: `AvtoVinchickTG-0.2.1.msi`. После скачивания приложение закроется, запустит `msiexec` в silent-режиме и перезапустится.
+Tag релиза лучше делать вида `v0.2.9` или `0.2.9`, но автообновление также умеет tag вроде `release`, если версия есть в имени MSI: `AvtoVinchickTG-0.2.9.msi`. После скачивания приложение закроется, запустит `msiexec` в silent-режиме и перезапустится.
+
+
+
+
+
+
+
+

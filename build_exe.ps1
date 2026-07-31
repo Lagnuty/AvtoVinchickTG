@@ -29,4 +29,4 @@ Run-Step $python @("-m", "pip", "install", "-r", "requirements.txt")
 if (-not (Test-Path "assets\AvtoVinchickTG.ico")) {
     Run-Step $python @("scripts\generate_icon.py")
 }
-Run-Step $python @("-m", "PyInstaller", "--clean", "-y", "--noconsole", "--name", "AvtoVinchickTG", "--icon", "assets\AvtoVinchickTG.ico", "--add-data", "assets;assets", "--add-data", "avto_vinchick_tg\web;avto_vinchick_tg\web", "--collect-all", "qt_material", "main.py")
+Run-Step $python @("-m", "PyInstaller", "--clean", "-y", "--noupx", "--noconsole", "--name", "AvtoVinchickTG", "--icon", "assets\AvtoVinchickTG.ico", "--add-data", "assets;assets", "--add-data", "avto_vinchick_tg\web;avto_vinchick_tg\web", "--collect-all", "qt_material", "main.py")

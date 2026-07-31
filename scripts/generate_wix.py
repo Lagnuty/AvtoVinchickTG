@@ -36,18 +36,11 @@ def main() -> None:
             "Scope": "perUser",
         },
     )
-    sub(
-        package,
-        "MajorUpgrade",
-        {
-            "DowngradeErrorMessage": "A newer version is already installed.",
-            "Schedule": "afterInstallExecute",
-        },
-    )
     sub(package, "MediaTemplate", {"EmbedCab": "yes"})
     sub(package, "Icon", {"Id": "AppIcon.ico", "SourceFile": str(ICON_PATH)})
     sub(package, "Property", {"Id": "ARPPRODUCTICON", "Value": "AppIcon.ico"})
     sub(package, "Property", {"Id": "DISABLEROLLBACK", "Value": "1"})
+    sub(package, "Property", {"Id": "ROOTDRIVE", "Value": "C:\\"})
     install_folder_property = sub(package, "Property", {"Id": "INSTALLFOLDER"})
     sub(
         install_folder_property,
@@ -64,6 +57,7 @@ def main() -> None:
     sub(package, "WixVariable", {"Id": "WixUILicenseRtf", "Value": str(LICENSE_PATH)})
     sub_ui(package, "WixUI", {"Id": "WixUI_InstallDir"})
 
+    sub(package, "StandardDirectory", {"Id": "SystemFolder"})
     local_app_data = sub(package, "StandardDirectory", {"Id": "LocalAppDataFolder"})
     programs = sub(local_app_data, "Directory", {"Id": "ProgramsFolder", "Name": "Programs"})
     install_folder = sub(programs, "Directory", {"Id": "INSTALLFOLDER", "Name": APP_NAME})
@@ -143,28 +137,46 @@ def main() -> None:
             "Value": "[INSTALLFOLDER]",
         },
     )
+    install_sequence = sub(package, "InstallExecuteSequence")
     sub(
         package,
         "CustomAction",
         {
-            "Id": "LaunchApplication",
-            "Directory": "INSTALLFOLDER",
-            "ExeCommand": "[INSTALLFOLDER]AvtoVinchickTG.exe",
+            "Id": "KillRunningApplication",
+            "Directory": "SystemFolder",
+            "ExeCommand": 'taskkill.exe /F /IM AvtoVinchickTG.exe /T',
             "Execute": "immediate",
-            "Return": "asyncNoWait",
+            "Return": "ignore",
         },
     )
-    install_sequence = sub(package, "InstallExecuteSequence")
-    sub(install_sequence, "DisableRollback", {"Before": "InstallInitialize"})
     sub(
         install_sequence,
         "Custom",
         {
-            "Action": "LaunchApplication",
-            "After": "InstallFinalize",
-            "Condition": "NOT Installed AND UILevel >= 5",
+            "Action": "KillRunningApplication",
+            "Before": "InstallValidate",
         },
     )
+    sub(
+        package,
+        "CustomAction",
+        {
+            "Id": "DeleteExistingExe",
+            "Directory": "INSTALLFOLDER",
+            "ExeCommand": 'cmd.exe /C if exist "AvtoVinchickTG.exe" del /F /Q "AvtoVinchickTG.exe"',
+            "Execute": "immediate",
+            "Return": "ignore",
+        },
+    )
+    sub(
+        install_sequence,
+        "Custom",
+        {
+            "Action": "DeleteExistingExe",
+            "Before": "InstallFiles",
+        },
+    )
+    sub(install_sequence, "DisableRollback", {"Before": "InstallInitialize"})
 
     feature = sub(package, "Feature", {"Id": "MainFeature", "Title": APP_NAME, "Level": "1"})
     sub(feature, "ComponentGroupRef", {"Id": "AppFiles"})

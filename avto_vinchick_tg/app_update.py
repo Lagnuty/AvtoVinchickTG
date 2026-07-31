@@ -120,11 +120,22 @@ $pidToWait = {pid}
 $installer = {ps_quote(installer_path)}
 $exe = {ps_quote(app_exe)}
 $target = Split-Path -Parent $exe
+$extract = Join-Path (Split-Path -Parent $installer) 'extracted'
 while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {{
     Start-Sleep -Milliseconds 400
 }}
-$args = @('/i', $installer, '/qn', '/norestart', "INSTALLFOLDER=$target")
+Get-Process -Name 'AvtoVinchickTG' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+if (Test-Path $extract) {{
+    Remove-Item -LiteralPath $extract -Recurse -Force
+}}
+New-Item -ItemType Directory -Force -Path $extract | Out-Null
+$args = @('/a', $installer, '/qn', '/norestart', "TARGETDIR=$extract")
 Start-Process -FilePath 'msiexec.exe' -ArgumentList $args -Wait
+$payload = Join-Path $extract 'LocalApp\\Programs\\AvtoVinchickTG'
+if (-not (Test-Path (Join-Path $payload 'AvtoVinchickTG.exe'))) {{
+    throw "MSI payload was not extracted correctly: $payload"
+}}
+Copy-Item -Path (Join-Path $payload '*') -Destination $target -Recurse -Force
 Start-Process -FilePath $exe -WorkingDirectory $target
 """.strip()
     script_path.parent.mkdir(parents=True, exist_ok=True)
