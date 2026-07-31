@@ -490,6 +490,7 @@ class MainWindow(QMainWindow):
         self.proxy_url.setText(config.proxy_url)
         self.reset_proxy_check()
         self.apply_filter_profile(FilterProfile(config.filters, config.taste))
+        self.send_rejects_to_log.setChecked(config.send_rejects_to_log)
         self.auto_skip_rejected.setChecked(config.dv_actions.auto_skip_rejected)
         self.auto_open_found.setChecked(config.dv_actions.auto_open_found)
         self.ignore_ads.setChecked(config.dv_actions.ignore_ads)
@@ -718,6 +719,41 @@ class MainWindow(QMainWindow):
             )
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def export_filter_profile(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить профиль фильтров",
+            str(APP_DIR.parent / "avto_vinchick_filters.json"),
+            "JSON (*.json);;Все файлы (*.*)",
+        )
+        if not path:
+            return
+        config = self.current_config()
+        try:
+            save_filter_profile(Path(path), FilterProfile(config.filters, config.taste))
+        except Exception as exc:
+            QMessageBox.critical(self, "Экспорт не выполнен", str(exc))
+            return
+        self.append_log(f"Фильтры экспортированы: {path}")
+
+    def import_filter_profile(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите профиль фильтров",
+            str(APP_DIR.parent),
+            "JSON (*.json);;Все файлы (*.*)",
+        )
+        if not path:
+            return
+        try:
+            profile = load_filter_profile(Path(path))
+        except Exception as exc:
+            QMessageBox.critical(self, "Импорт не выполнен", str(exc))
+            return
+        self.apply_filter_profile(profile)
+        self.save_config()
+        self.append_log(f"Фильтры импортированы: {path}")
 
     def start(self) -> None:
         config = self.current_config()

@@ -1,6 +1,12 @@
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from avto_vinchick_tg.filter_profile import FilterProfile, load_filter_profile, save_filter_profile
 from avto_vinchick_tg.filters import FilterSettings, evaluate_profile, extract_age
 from avto_vinchick_tg.core_update import is_newer_version, parse_version_py
 from avto_vinchick_tg.app_update import choose_windows_asset, normalize_tag
+from avto_vinchick_tg.taste_model import TasteSettings
 
 
 def test_extract_age_prefers_age_marker():
@@ -51,3 +57,26 @@ def test_choose_windows_installer_asset():
     )
 
     assert asset["name"] == "AvtoVinchickTG-0.1.2.msi"
+
+
+def test_filter_profile_roundtrip_has_no_private_fields():
+    with TemporaryDirectory() as temp_dir:
+        path = Path(temp_dir) / "filters.json"
+        profile = FilterProfile(
+            filters=FilterSettings(banned_text=["астрология"], min_age=18, reject_links=True),
+            taste=TasteSettings(enabled=True, min_score=70, min_samples=12),
+        )
+
+        save_filter_profile(path, profile)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        loaded = load_filter_profile(path)
+
+        assert "bot_token" not in data
+        assert "phone" not in data
+        assert "proxy_url" not in data
+        assert loaded.filters.banned_text == ["астрология"]
+        assert loaded.filters.min_age == 18
+        assert loaded.filters.reject_links
+        assert loaded.taste.enabled
+        assert loaded.taste.min_score == 70
+        assert loaded.taste.min_samples == 12
