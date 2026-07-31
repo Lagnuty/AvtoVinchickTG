@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from avto_vinchick_tg.filter_profile import FilterProfile, load_filter_profile, save_filter_profile
 from avto_vinchick_tg.filters import FilterSettings, evaluate_profile, extract_age
 from avto_vinchick_tg.core_update import is_newer_version, parse_version_py
-from avto_vinchick_tg.app_update import choose_windows_asset, normalize_tag
+from avto_vinchick_tg.app_update import choose_windows_asset, normalize_tag, release_version
 from avto_vinchick_tg.taste_model import TasteSettings
 
 
@@ -57,6 +57,13 @@ def test_choose_windows_installer_asset():
     )
 
     assert asset["name"] == "AvtoVinchickTG-0.1.2.msi"
+
+
+def test_release_version_falls_back_to_msi_asset_name():
+    release = {"tag_name": "release", "name": "release"}
+    asset = {"name": "AvtoVinchickTG-0.1.20.msi"}
+
+    assert release_version(release, asset) == "0.1.20"
 
 
 def test_filter_profile_roundtrip_has_no_private_fields():

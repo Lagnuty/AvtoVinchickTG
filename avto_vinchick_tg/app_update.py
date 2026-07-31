@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -41,11 +42,11 @@ def fetch_latest_app_release(current_version: str, proxy_url: str = "") -> AppRe
         if exc.code == 404:
             return None
         raise
-    version = normalize_tag(str(data.get("tag_name") or data.get("name") or ""))
-    if not is_newer_version(version, current_version):
-        return None
     asset = choose_windows_asset(data.get("assets") or [])
     if not asset:
+        return None
+    version = release_version(data, asset)
+    if not is_newer_version(version, current_version):
         return None
     return AppRelease(
         version=version,
@@ -137,6 +138,23 @@ def read_json(request: Request) -> dict:
 
 def normalize_tag(value: str) -> str:
     return value.strip().lstrip("vV")
+
+
+def release_version(release: dict, asset: dict) -> str:
+    for value in [
+        str(release.get("tag_name") or ""),
+        str(release.get("name") or ""),
+        str(asset.get("name") or ""),
+    ]:
+        version = extract_version(value)
+        if version:
+            return version
+    return normalize_tag(str(release.get("tag_name") or release.get("name") or ""))
+
+
+def extract_version(value: str) -> str:
+    match = re.search(r"(?<!\d)(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(?!\d)", value)
+    return match.group(1) if match else ""
 
 
 def ps_quote(path: Path) -> str:
