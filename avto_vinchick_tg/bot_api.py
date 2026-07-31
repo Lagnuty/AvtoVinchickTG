@@ -57,6 +57,28 @@ class BotApi:
             fields["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
         return self.call_multipart(method, fields, field_name, file_path)
 
+    def send_media_group(self, chat_id: str, file_paths: list[Path], *, caption: str = "") -> dict[str, Any]:
+        files = file_paths[:10]
+        if not files:
+            return self.send_message(chat_id, caption or "Медиа анкеты")
+        media = []
+        file_map: dict[str, Path] = {}
+        for index, file_path in enumerate(files):
+            attach_name = f"file{index}"
+            item: dict[str, Any] = {
+                "type": "photo" if is_photo_file(file_path) else "document",
+                "media": f"attach://{attach_name}",
+            }
+            if index == 0 and caption:
+                item["caption"] = caption[:1024]
+            media.append(item)
+            file_map[attach_name] = file_path
+        return self.call_multipart_files(
+            "sendMediaGroup",
+            {"chat_id": chat_id, "media": json.dumps(media, ensure_ascii=False)},
+            file_map,
+        )
+
     def answer_callback_query(self, callback_query_id: str, *, text: str = "") -> dict[str, Any]:
         payload = {"callback_query_id": callback_query_id}
         if text:
@@ -82,6 +104,23 @@ class BotApi:
             raise ValueError("Bot token is empty")
         boundary = f"----AvtoVinchickTG{uuid.uuid4().hex}"
         body = build_multipart_body(boundary, fields, file_field, file_path)
+        request = Request(
+            f"https://api.telegram.org/bot{self.token}/{method}",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        return run_with_optional_socks_proxy(self.proxy_url, lambda: read_json(request))
+
+    def call_multipart_files(
+        self,
+        method: str,
+        fields: dict[str, Any],
+        files: dict[str, Path],
+    ) -> dict[str, Any]:
+        if not self.token:
+            raise ValueError("Bot token is empty")
+        boundary = f"----AvtoVinchickTG{uuid.uuid4().hex}"
+        body = build_multipart_body_files(boundary, fields, files)
         request = Request(
             f"https://api.telegram.org/bot{self.token}/{method}",
             data=body,
@@ -135,6 +174,10 @@ def split_telegram_text(text: str, limit: int = 3900) -> list[str]:
 
 
 def build_multipart_body(boundary: str, fields: dict[str, Any], file_field: str, file_path: Path) -> bytes:
+    return build_multipart_body_files(boundary, fields, {file_field: file_path})
+
+
+def build_multipart_body_files(boundary: str, fields: dict[str, Any], files: dict[str, Path]) -> bytes:
     parts: list[bytes] = []
     for name, value in fields.items():
         parts.extend(
@@ -145,20 +188,21 @@ def build_multipart_body(boundary: str, fields: dict[str, Any], file_field: str,
                 b"\r\n",
             ]
         )
-    filename = file_path.name
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    parts.extend(
-        [
-            f"--{boundary}\r\n".encode("utf-8"),
-            (
-                f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
-                f"Content-Type: {content_type}\r\n\r\n"
-            ).encode("utf-8"),
-            file_path.read_bytes(),
-            b"\r\n",
-            f"--{boundary}--\r\n".encode("utf-8"),
-        ]
-    )
+    for file_field, file_path in files.items():
+        filename = file_path.name
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        parts.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                (
+                    f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
+                    f"Content-Type: {content_type}\r\n\r\n"
+                ).encode("utf-8"),
+                file_path.read_bytes(),
+                b"\r\n",
+            ]
+        )
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
     return b"".join(parts)
 
 

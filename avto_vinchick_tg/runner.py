@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import tempfile
 import threading
 import traceback
@@ -40,6 +41,8 @@ class VinchikRunner:
         self._login_state: LoginState | None = None
         self._taste_model = TasteModel()
         self._pending_profile_text: str | None = None
+        self._album_messages: dict[int, list] = {}
+        self._album_tasks: dict[int, asyncio.Task] = {}
 
     @property
     def running(self) -> bool:
@@ -84,6 +87,8 @@ class VinchikRunner:
 
     async def _run(self, config: AppConfig) -> None:
         self._stop_event = asyncio.Event()
+        self._album_messages.clear()
+        self._album_tasks.clear()
         layer = make_layer(config)
         bot = BotApi(config.bot_token, proxy_url=config.proxy_url)
         async with layer.lifespan():
@@ -99,66 +104,104 @@ class VinchikRunner:
             @client.on(events_new_message(config.source_chat))
             async def handler(event):
                 message = event.message
-                text = message.message or ""
-                kind = classify_dv_message(text)
-
-                if kind == DvMessageKind.AD and config.dv_actions.ignore_ads:
-                    self.log("ДВ: реклама или premium-сообщение пропущены.")
+                grouped_id = getattr(message, "grouped_id", None)
+                if grouped_id:
+                    album_id = int(grouped_id)
+                    self._album_messages.setdefault(album_id, []).append(message)
+                    old_task = self._album_tasks.pop(album_id, None)
+                    if old_task:
+                        old_task.cancel()
+                    self._album_tasks[album_id] = asyncio.create_task(
+                        self._flush_album(album_id, bot, client, config)
+                    )
                     return
-                if kind == DvMessageKind.FOUND_PROMPT and config.dv_actions.auto_open_found:
-                    await send_dv_command(client, config.source_chat, "1")
-                    self.log("ДВ: найден список анкет, отправил 1 для показа.")
-                    return
-                if kind in {DvMessageKind.LIKE_NOTICE, DvMessageKind.MATCH_NOTICE}:
-                    if config.dv_actions.forward_likes:
-                        await asyncio.to_thread(
-                            bot.send_message,
-                            config.notify_chat_id,
-                            format_service_message(text, kind),
-                        )
-                        self.log("ДВ: уведомление о лайке/симпатии отправлено в вашего бота.")
-                    return
-                if kind != DvMessageKind.PROFILE:
-                    self.log(f"ДВ: системное сообщение пропущено ({kind.value}).")
-                    return
-
-                result = evaluate_profile(text, config.filters, has_media=bool(message.media))
-                if result.accepted:
-                    if config.taste.enabled:
-                        prediction = self._taste_model.predict(text, min_samples=config.taste.min_samples)
-                        if prediction.trained and prediction.score < config.taste.min_score:
-                            self.log(
-                                f"ML: анкета отсеяна по описанию, score {prediction.score}/100 "
-                                f"< {config.taste.min_score}/100."
-                            )
-                            if config.dv_actions.auto_skip_rejected:
-                                await send_dv_command(client, config.source_chat, "3")
-                            return
-                        if prediction.trained:
-                            self.log(f"ML: анкета прошла по описанию, score {prediction.score}/100.")
-                        else:
-                            self.log(
-                                f"ML: мало обучающих оценок "
-                                f"({prediction.total_samples}/{config.taste.min_samples}), анкета пропущена к вам."
-                            )
-                    await notify_profile(bot, client, config, message, format_profile_message(text, result))
-                    self._pending_profile_text = text
-                    command = command_for_accepted(config.dv_actions.accepted_action)
-                    if command:
-                        await send_dv_command(client, config.source_chat, command)
-                        self.log(f"ДВ: анкета принята, отправлена команда {command}.")
-                    else:
-                        self.log(f"Принято: {result.word_count} слов, возраст {result.age or 'не найден'}")
-                elif config.send_rejects_to_log:
-                    self.log("Отсеяно: " + "; ".join(result.reasons[:4]))
-                if not result.accepted and config.dv_actions.auto_skip_rejected:
-                    await send_dv_command(client, config.source_chat, "3")
-                    self.log("ДВ: анкета не прошла фильтры, отправлена команда 3.")
+                await self._process_dv_messages([message], bot, client, config)
 
             while not self._stop_event.is_set():
                 await asyncio.sleep(0.2)
             bot_poll_task.cancel()
+            for task in self._album_tasks.values():
+                task.cancel()
+            self._album_tasks.clear()
+            self._album_messages.clear()
             self.log("Остановлено.")
+
+    async def _flush_album(self, album_id: int, bot: BotApi, client, config: AppConfig) -> None:
+        try:
+            await asyncio.sleep(1.0)
+            messages = self._album_messages.pop(album_id, [])
+            self._album_tasks.pop(album_id, None)
+            if messages:
+                messages.sort(key=lambda item: getattr(item, "id", 0))
+                await self._process_dv_messages(messages, bot, client, config)
+        except asyncio.CancelledError:
+            return
+
+    async def _process_dv_messages(self, messages: list, bot: BotApi, client, config: AppConfig) -> None:
+        text = combined_message_text(messages)
+        has_media = any(bool(getattr(message, "media", None)) for message in messages)
+        kind = classify_dv_message(text)
+
+        if kind == DvMessageKind.UNKNOWN and has_media:
+            kind = DvMessageKind.PROFILE
+
+        if kind == DvMessageKind.AD and config.dv_actions.ignore_ads:
+            self.log("ДВ: реклама или premium-сообщение пропущены.")
+            return
+        if kind == DvMessageKind.FOUND_PROMPT and config.dv_actions.auto_open_found:
+            await send_dv_command(client, config.source_chat, "1")
+            self.log("ДВ: найден список анкет, отправил 1 для показа.")
+            return
+        if kind in {DvMessageKind.LIKE_NOTICE, DvMessageKind.MATCH_NOTICE}:
+            if config.dv_actions.forward_likes:
+                await asyncio.to_thread(
+                    bot.send_message,
+                    config.notify_chat_id,
+                    format_service_message(text, kind),
+                )
+                self.log("ДВ: уведомление о лайке/симпатии отправлено в вашего бота.")
+            return
+        if kind != DvMessageKind.PROFILE:
+            self.log(f"ДВ: системное сообщение пропущено ({kind.value}).")
+            return
+        if not has_profile_description(text):
+            await send_dv_command(client, config.source_chat, "3")
+            self._pending_profile_text = None
+            self.log("ДВ: анкета без описания, сразу отправлена команда 3.")
+            return
+
+        result = evaluate_profile(text, config.filters, has_media=has_media)
+        if result.accepted:
+            if config.taste.enabled:
+                prediction = self._taste_model.predict(text, min_samples=config.taste.min_samples)
+                if prediction.trained and prediction.score < config.taste.min_score:
+                    self.log(
+                        f"ML: анкета отсеяна по описанию, score {prediction.score}/100 "
+                        f"< {config.taste.min_score}/100."
+                    )
+                    if config.dv_actions.auto_skip_rejected:
+                        await send_dv_command(client, config.source_chat, "3")
+                    return
+                if prediction.trained:
+                    self.log(f"ML: анкета прошла по описанию, score {prediction.score}/100.")
+                else:
+                    self.log(
+                        f"ML: мало обучающих оценок "
+                        f"({prediction.total_samples}/{config.taste.min_samples}), анкета пропущена к вам."
+                    )
+            await notify_profile(bot, client, config, messages, format_profile_message(text, result))
+            self._pending_profile_text = text
+            command = command_for_accepted(config.dv_actions.accepted_action)
+            if command:
+                await send_dv_command(client, config.source_chat, command)
+                self.log(f"ДВ: анкета принята, отправлена команда {command}.")
+            else:
+                self.log(f"Принято: {result.word_count} слов, возраст {result.age or 'не найден'}")
+        elif config.send_rejects_to_log:
+            self.log("Отсеяно: " + "; ".join(result.reasons[:4]))
+        if not result.accepted and config.dv_actions.auto_skip_rejected:
+            await send_dv_command(client, config.source_chat, "3")
+            self.log("ДВ: анкета не прошла фильтры, отправлена команда 3.")
 
     async def _poll_bot_commands(self, bot: BotApi, client, config: AppConfig) -> None:
         offset = await asyncio.to_thread(initial_bot_update_offset, bot)
@@ -323,29 +366,72 @@ async def send_dv_command(client, source_chat: str, command: str) -> None:
     await client.send_message(chat, command)
 
 
-async def notify_profile(bot: BotApi, client, config: AppConfig, message, text: str) -> None:
+async def notify_profile(bot: BotApi, client, config: AppConfig, messages: list, text: str) -> None:
     notification = with_answer_options(text)
-    if not message.media:
+    media_messages = [message for message in messages if getattr(message, "media", None)]
+    if not media_messages:
         await asyncio.to_thread(bot.send_message, config.notify_chat_id, notification)
         return
     with tempfile.TemporaryDirectory(prefix="avto_vinchick_tg_") as temp_dir:
-        media_path = await client.download_media(message, file=temp_dir)
-        if not media_path:
+        media_paths = []
+        for message in media_messages[:3]:
+            media_path = await client.download_media(message, file=temp_dir)
+            if media_path:
+                media_paths.append(Path(media_path))
+        if not media_paths:
             await asyncio.to_thread(bot.send_message, config.notify_chat_id, notification)
             return
-        await asyncio.to_thread(
-            bot.send_media,
-            config.notify_chat_id,
-            Path(media_path),
-            caption="Фото анкеты",
-        )
-        await asyncio.to_thread(bot.send_message, config.notify_chat_id, notification)
+        if len(media_paths) == 1:
+            await asyncio.to_thread(
+                bot.send_media,
+                config.notify_chat_id,
+                media_paths[0],
+                caption=notification[:1024],
+            )
+        else:
+            await asyncio.to_thread(
+                bot.send_media_group,
+                config.notify_chat_id,
+                media_paths,
+                caption=notification[:1024],
+            )
+        if len(notification) > 1024:
+            await asyncio.to_thread(bot.send_message, config.notify_chat_id, notification)
 
 
 def initial_bot_update_offset(bot: BotApi) -> int | None:
     updates = bot.get_updates(timeout=0)
     update_ids = [item.get("update_id") for item in updates.get("result") or [] if isinstance(item.get("update_id"), int)]
     return max(update_ids) + 1 if update_ids else None
+
+
+def combined_message_text(messages: list) -> str:
+    seen: set[str] = set()
+    parts = []
+    for message in messages:
+        text = (getattr(message, "message", None) or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            parts.append(text)
+    return "\n\n".join(parts).strip()
+
+
+def has_profile_description(text: str) -> bool:
+    clean = (text or "").strip()
+    if not clean:
+        return False
+    lines = [line.strip() for line in clean.splitlines() if line.strip()]
+    if len(lines) > 1 and any(has_text_payload(line) for line in lines[1:]):
+        return True
+    for separator in (" – ", " - "):
+        if separator in clean:
+            return has_text_payload(clean.split(separator, 1)[1])
+    return False
+
+
+def has_text_payload(text: str) -> bool:
+    words = re.findall(r"[^\W\d_]{2,}", text, flags=re.UNICODE)
+    return len(words) >= 2
 
 
 def format_profile_message(text: str, result) -> str:

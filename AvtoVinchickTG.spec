@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets', 'assets')]
+datas = [('assets', 'assets'), ('avto_vinchick_tg\\web', 'avto_vinchick_tg\\web')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('qt_material')

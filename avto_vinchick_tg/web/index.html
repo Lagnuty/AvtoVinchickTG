@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AvtoVinchickTG</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">AV</div>
+        <div>
+          <h1>AvtoVinchickTG</h1>
+          <p>Локальный фильтр Дайвинчика</p>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="overview">Обзор</button>
+        <button class="nav-item" data-view="telegram">Telegram</button>
+        <button class="nav-item" data-view="bot">Бот</button>
+        <button class="nav-item" data-view="filters">Фильтры</button>
+        <button class="nav-item" data-view="ml">ML вкус</button>
+        <button class="nav-item" data-view="run">Запуск</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="versionBadge">v...</span>
+        <span id="coreBadge">core ...</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Локальная web-панель</p>
+          <h2 id="pageTitle">Обзор</h2>
+        </div>
+        <div class="top-actions">
+          <span id="runPill" class="pill">Статус</span>
+          <button id="refreshStatus" class="ghost">Обновить</button>
+          <button id="checkUpdates" class="ghost">Проверить обновления</button>
+          <button id="installUpdate" class="primary hidden">Установить обновление</button>
+        </div>
+      </header>
+
+      <section class="view active" id="overview">
+        <div class="metric-grid">
+          <div class="metric">
+            <span>Слушатель</span>
+            <strong id="runnerStatus">...</strong>
+          </div>
+          <div class="metric">
+            <span>ML оценки</span>
+            <strong id="tasteTotal">0</strong>
+          </div>
+          <div class="metric">
+            <span>Положительные</span>
+            <strong id="tastePositive">0</strong>
+          </div>
+          <div class="metric">
+            <span>Негатив описания</span>
+            <strong id="tasteNegative">0</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="telegram">
+        <div class="panel form-panel">
+          <h3>1. Сеть и Telegram</h3>
+          <div class="grid two">
+            <label>SOCKS5H proxy<input id="proxy_url" placeholder="socks5h://login:password@host:port"></label>
+            <label>Телефон<input id="phone" placeholder="+79990000000"></label>
+          </div>
+          <div class="button-row">
+            <button id="checkProxy" class="ghost">Проверить прокси</button>
+            <button id="sendCode" class="primary">Отправить код</button>
+          </div>
+          <div class="grid two">
+            <label>Код<input id="code" placeholder="Код из Telegram"></label>
+            <label>2FA пароль<input id="password" type="password" placeholder="Пароль 2FA"></label>
+          </div>
+          <div class="button-row">
+            <button id="submitCode" class="primary">Войти по коду</button>
+            <button id="submitPassword" class="ghost">Войти с 2FA</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="bot">
+        <div class="panel form-panel">
+          <h3>2. Бот и источник</h3>
+          <div class="grid two">
+            <label>Bot token<input id="bot_token" type="password" placeholder="123456:ABC..."></label>
+            <label>Ваш chat_id<input id="notify_chat_id" placeholder="Нажмите Найти chat_id"></label>
+          </div>
+          <label>Чат Дайвинчика<input id="source_chat" placeholder="LeomatchBot"></label>
+          <div class="button-row">
+            <button id="testBot" class="ghost">Тест бота</button>
+            <button id="findChatId" class="ghost">Найти chat_id</button>
+            <button id="saveBot" class="primary">Сохранить</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="filters">
+        <div class="panel form-panel">
+          <div class="panel-head">
+            <div>
+              <h3>3. Фильтры</h3>
+              <p>Первый слой отбора до ML.</p>
+            </div>
+            <div class="button-row compact">
+              <button id="importFiltersBtn" class="ghost">Импорт JSON</button>
+              <button id="exportFiltersBtn" class="ghost">Экспорт JSON</button>
+              <input id="filterFile" class="hidden" type="file" accept="application/json,.json">
+            </div>
+          </div>
+          <div class="grid two">
+            <label>Запрещенные слова/фразы<textarea id="banned_text"></textarea></label>
+            <label>Обязательные слова/фразы<textarea id="required_text"></textarea></label>
+            <label>Запрещенные regex<textarea id="banned_regex"></textarea></label>
+            <label>Обязательные regex<textarea id="required_regex"></textarea></label>
+          </div>
+          <div class="grid six">
+            <label>Мин. слов<input id="min_words" type="number" min="0"></label>
+            <label>Макс. слов<input id="max_words" type="number" min="0"></label>
+            <label>Мин. символов<input id="min_chars" type="number" min="0"></label>
+            <label>Макс. символов<input id="max_chars" type="number" min="0"></label>
+            <label>Мин. возраст<input id="min_age" type="number" min="0"></label>
+            <label>Макс. возраст<input id="max_age" type="number" min="0"></label>
+          </div>
+          <div class="checks">
+            <label><input id="reject_without_age" type="checkbox"> Отсеивать без возраста</label>
+            <label><input id="require_photo" type="checkbox"> Требовать фото/медиа</label>
+            <label><input id="reject_links" type="checkbox"> Отсеивать ссылки</label>
+            <label><input id="reject_mentions" type="checkbox"> Отсеивать @mentions</label>
+            <label><input id="send_rejects_to_log" type="checkbox"> Логировать отказы</label>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="ml">
+        <div class="panel form-panel">
+          <h3>4. ML вкус по описанию</h3>
+          <div class="ml-card">
+            <label class="switch"><input id="taste_enabled" type="checkbox"><span></span>Включить ML-отбор</label>
+            <div class="grid two">
+              <label>Мин. score<input id="taste_min_score" type="number" min="0" max="100"></label>
+              <label>Мин. оценок до отбора<input id="taste_min_samples" type="number" min="1"></label>
+            </div>
+            <p class="hint">1/2 обучают положительно. 3 означает внешность и не обучает описание. 4 обучает негативом описания.</p>
+          </div>
+          <div class="upload">
+            <input id="tasteFile" type="file" accept=".zip,.json,application/json">
+            <button id="importTaste" class="primary">Импорт Telegram export</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="run">
+        <div class="panel form-panel">
+          <h3>5. Запуск и поведение</h3>
+          <label>Подходящая анкета
+            <select id="accepted_action">
+              <option value="notify">Только переслать мне</option>
+              <option value="like">Переслать мне и лайкнуть: 1</option>
+              <option value="like_message">Переслать мне и лайкнуть с посланием: 2</option>
+              <option value="skip">Переслать мне и пропустить: 3</option>
+            </select>
+          </label>
+          <div class="checks">
+            <label><input id="auto_skip_rejected" type="checkbox"> Неподходящие анкеты пропускать командой 3</label>
+            <label><input id="auto_open_found" type="checkbox"> На “Нашел анкеты. Показать?” отвечать 1</label>
+            <label><input id="ignore_ads" type="checkbox"> Игнорировать рекламу и Premium</label>
+            <label><input id="forward_likes" type="checkbox"> Пересылать лайки/симпатии</label>
+          </div>
+          <div class="button-row">
+            <button id="saveAll" class="ghost">Сохранить</button>
+            <button id="startRunner" class="primary">Запуск</button>
+            <button id="stopRunner" class="danger">Стоп</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel log-panel">
+        <div class="panel-head">
+          <div>
+            <h3>Журнал</h3>
+            <p>События видны на каждой странице.</p>
+          </div>
+          <button id="clearLog" class="ghost">Очистить экран</button>
+        </div>
+        <pre id="logView" class="log"></pre>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
